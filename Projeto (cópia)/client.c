@@ -9,6 +9,7 @@
 #include <dirent.h> //Para ler pastas
 
 #define BUF_SIZE	1024
+#define DEBUG
 
 void erro(char *msg);
 void process_client(int client_fd);
@@ -61,6 +62,9 @@ void process_client(int client_fd){
 			write(client_fd,comando,1+strlen(comando));
 			int n_files=0;
 			receive_int(&n_files,client_fd);
+			#ifdef DEBUG
+			printf("N de ficheiros: %d\n",n_files);
+			#endif
 			printf("Os ficheiros existentes para download são:\n");
 			for(int i=0; i<n_files; i++){
 				bzero(buffer, BUF_SIZE);
@@ -72,23 +76,34 @@ void process_client(int client_fd){
 			write(client_fd,comando,1+strlen(comando));
 			break;
 		}else{
-		char *token,*saved;
+		char *token;
 		char dup[BUF_SIZE];
 		strcpy(dup, comando);
-		token = strtok_r(comando," ",&saved);
+		token = strtok(comando," ");
 		if(strcmp(token,"DOWNLOAD")==0){
 			char file[256], tipo[4], enc[4];
-			printf("Comando: %s", dup);//DEBUG
-			if(sscanf(dup,"%*s %s %s %s",tipo,enc,file)!=3){
-				int aux;
-				write(client_fd,comando,1+strlen(comando));
-				receive_int(&aux, client_fd);
-				printf("Filesize %d\n", aux);//DEBUG
-				if(aux==0){
-					printf("Ocorreu um erro a transferir o ficheiro\n");
-				}else{
-					recebeStringBytes(saved, client_fd);
-					}
+			token = strtok(NULL, " ");
+			if(token!=NULL){
+				strcpy(tipo, token);
+				}
+			token = strtok(NULL, " ");
+			if(token!=NULL){
+			strcpy(enc, token);
+			}
+			token = strtok(NULL, " ");
+			if(token!=NULL){
+			strcpy(file, token);
+			#ifdef DEBUG
+			printf("TIPO: %s ENC: %s FILE: %s\n", tipo, enc, file);
+			#endif
+			int aux=0;
+			write(client_fd,dup,1+strlen(dup));
+			receive_int(&aux, client_fd);
+			if(aux==0){
+				printf("Ocorreu um erro a transferir o ficheiro\n");
+			}else{
+				recebeStringBytes(file, client_fd);
+				}
 			}else{
 				printf("DOWNLOAD <TCP/UDP> <ENC/NOR> FILE\n");
 				}
@@ -105,8 +120,10 @@ int recebeStringBytes(char *file, int server_fd){
 	char buffer[BUF_SIZE];
 	bzero(buffer, BUF_SIZE);
 	nread=0;
-	int filesize;
-	receive_int(&filesize, server_fd);
+	int filesize=0;
+	read(server_fd, &filesize, sizeof(filesize));
+	filesize = ntohl(filesize);
+	printf("Filesize %d\n", filesize);//DEBUG
 	char cwd[256];
 	if(getcwd(cwd, sizeof(cwd)) == NULL){
 		printf("No such file or directory");
@@ -114,7 +131,7 @@ int recebeStringBytes(char *file, int server_fd){
 	}
 	strcat(cwd,"/Downloads/");
 	strcat(cwd,file);
-	write_ptr = fopen(cwd, "wb+");
+	write_ptr = fopen(cwd, "wb");
 	for(int i=filesize; i>0; i=i-BUF_SIZE){
 		nread=0;
 		nread = read(server_fd, buffer, BUF_SIZE);

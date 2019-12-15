@@ -14,6 +14,7 @@
 
 
 #define BUF_SIZE	1024
+#define DEBUG
 
 int SERVER_PORT;
 int MAX_CLIENTS;
@@ -129,16 +130,28 @@ int main(int argc, char **argv) {
 					continue;
 				bzero(buffer, sizeof(buffer));
 				strcat(buffer,dptr->d_name);
+				#ifdef DEBUG
+				printf("%s\n", dptr->d_name);
+				#endif
 				write(client_fd, buffer, 1+strlen(buffer));
+				sleep(1);
 			}
 		}else if(strcmp(buffer,"QUIT")==0){
 		close(client_fd);//fecha a ligaçao com o cliente
 		}else{
-			char *tipo,*saved;
-			tipo = strtok_r(buffer," ",&saved);
-			if(strcmp(tipo,"DOWNLOAD")==0){
+			char *token;
+			token = strtok(buffer," ");
+			if(strcmp(token,"DOWNLOAD")==0){
 				char file[256], tipo[4], enc[4];
-				sscanf(saved,"%*s %s %s %s",tipo, enc, file);
+				token = strtok(NULL, " ");
+				strcpy(tipo, token);
+				token = strtok(NULL, " ");
+				strcpy(enc, token);
+				token = strtok(NULL, " ");
+				strcpy(file, token);
+				#ifdef DEBUG
+				printf("TIPO: %s ENC: %s FILE: %s\n", tipo, enc, file);
+				#endif
 				char cwd[256];
 				struct dirent *dptr;
 				DIR *dp = NULL;
@@ -215,12 +228,17 @@ int receive_int(int *num, int fd){
 		read_ptr = fopen(file,"rb");
 		
 		fseek(read_ptr, 0, SEEK_END);
-		unsigned int filesize = ftell(read_ptr);
+		int filesize = ftell(read_ptr);
+		#ifdef DEBUG
+		printf("Tamanho do ficheiro %d\n", filesize);
+		#endif
 		fseek(read_ptr, 0, SEEK_SET);
 		unsigned char stream[BUF_SIZE];
 		bzero(stream, sizeof(stream));
 		//Send filesize
-		send_int(filesize, client_fd);
+		filesize = htonl(filesize);
+		// Write the number to the opened socket
+		write(client_fd, &filesize, sizeof(filesize));
 		int n_sent;
 		int n_received;
 		do{
@@ -228,6 +246,7 @@ int receive_int(int *num, int fd){
 			n_received=0;
 			n_sent=fread(stream,BUF_SIZE,1,read_ptr);
 			write(client_fd,stream,BUF_SIZE);
+			sleep(1);
 			bzero(stream, sizeof(stream));
 			
 			receive_int(&n_received, client_fd);
