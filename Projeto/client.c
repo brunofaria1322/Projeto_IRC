@@ -20,15 +20,15 @@ int main(int argc, char *argv[]) {
 	struct sockaddr_in addr;
 	struct hostent *hostPtr;
 
-	if (argc != 3) {
-		printf("cliente <host> <port> \n");
+	if (argc != 5) {
+		printf("client {proxy address} {server address} {port} {protocol}\n");
 		exit(-1);
 	}
 
 	strcpy(endServer, argv[1]);
 	if ((hostPtr = gethostbyname(endServer)) == 0)
 		erro("Nao consegui obter endereço");
-	
+
 	bzero((void *) &addr, sizeof(addr));
 	addr.sin_family = AF_INET;
 	addr.sin_addr.s_addr = ((struct in_addr *)(hostPtr->h_addr))->s_addr;
@@ -44,7 +44,7 @@ int main(int argc, char *argv[]) {
 }
 
 void erro(char *msg) {
-	printf("Erro: %s\n", msg);
+	perror(msg);
 	exit(-1);
 }
 void process_client(int client_fd){
@@ -102,7 +102,7 @@ int receive_int(int *num, int fd){
     int rc;
     do {
         rc = read(fd, data, left);
-            
+
 		data += rc;
 		left -= rc;
     }while (left > 0);
