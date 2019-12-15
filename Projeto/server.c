@@ -51,23 +51,23 @@ int main(int argc, char **argv) {
 		erro("na funcao listen");
 	client_addr_size = sizeof(client_addr);
 	while (1) {
-	//clean finished child processes, avoiding zombies
-	//must use WNOHANG or would block whenever a child process was working
-	while(waitpid(-1,NULL,WNOHANG)>0);
-	//wait for new connection
-	while(CURR_CLIENTS>MAX_CLIENTS);
+		//clean finished child processes, avoiding zombies
+		//must use WNOHANG or would block whenever a child process was working
+		while(waitpid(-1,NULL,WNOHANG)>0);
+		//wait for new connection
+		while(CURR_CLIENTS>MAX_CLIENTS);
 
-	client = accept(fd,(struct sockaddr *)&client_addr,(socklen_t *)&client_addr_size);//quando finalmente chega um cliente temos de guardar os seus dados numa estrutura(ip, ...). A funcao accept escreve nos seus parametros os dados dos clientes. Devolve um descritor de socket(mesmo tipo de fd) ou -1 se falhar
-	if (client > 0) {
-		CURR_CLIENTS++;
-	if (fork() == 0) {//depois do accept faço um fork para continuar à escuta no socket principal
-		close(fd);//processo filho fecha o socket fd
-		process_client(client, CURR_CLIENTS, (struct sockaddr_in) client_addr);//processa os dados do cliente
-		CURR_CLIENTS--;
-		exit(0);
-	}
-	close(client);//fecha a ligação com o cliente se falhar
-	}
+		client = accept(fd,(struct sockaddr *)&client_addr,(socklen_t *)&client_addr_size);//quando finalmente chega um cliente temos de guardar os seus dados numa estrutura(ip, ...). A funcao accept escreve nos seus parametros os dados dos clientes. Devolve um descritor de socket(mesmo tipo de fd) ou -1 se falhar
+		if (client > 0) {
+			CURR_CLIENTS++;
+			if (fork() == 0) {//depois do accept faço um fork para continuar à escuta no socket principal
+				close(fd);//processo filho fecha o socket fd
+				process_client(client, CURR_CLIENTS, (struct sockaddr_in) client_addr);//processa os dados do cliente
+				CURR_CLIENTS--;
+				exit(0);
+			}
+			close(client);//fecha a ligação com o cliente se falhar
+		}
 	}
 	return 0;
 	}

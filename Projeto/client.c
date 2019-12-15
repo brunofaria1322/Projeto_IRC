@@ -15,28 +15,29 @@ void process_client(int client_fd);
 int receive_int(int *num, int fd);
 
 int main(int argc, char *argv[]) {
-	char endServer[100];
+	char proxyAddress[128];
 	int fd;
 	struct sockaddr_in addr;
-	struct hostent *hostPtr;
+	struct hostent *proxyHostPtr;
 
 	if (argc != 5) {
 		printf("client {proxy address} {server address} {port} {protocol}\n");
 		exit(-1);
 	}
 
-	strcpy(endServer, argv[1]);
-	if ((hostPtr = gethostbyname(endServer)) == 0)
-		erro("Nao consegui obter endereço");
+	//get proxy
+	strcpy(proxyAddress, argv[1]);
+	if ((proxyHostPtr = gethostbyname(proxyAddress)) == 0)
+		erro("couldnt get Proxy address");
 
 	bzero((void *) &addr, sizeof(addr));
 	addr.sin_family = AF_INET;
-	addr.sin_addr.s_addr = ((struct in_addr *)(hostPtr->h_addr))->s_addr;
-	addr.sin_port = htons((short) atoi(argv[2]));
+	addr.sin_addr.s_addr = ((struct in_addr *)(proxyHostPtr->h_addr))->s_addr;
+	addr.sin_port = htons((short) atoi(argv[2]));			//host to network
 
 	if((fd = socket(AF_INET,SOCK_STREAM,0)) == -1)
 		erro("socket");
-	if( connect(fd,(struct sockaddr *)&addr,sizeof (addr)) < 0)
+	if( connect(fd,(struct sockaddr *)&addr,sizeof (addr)) !=0)
 		erro("Connect");
 	process_client(fd);
 	close(fd);
@@ -52,8 +53,10 @@ void process_client(int client_fd){
 	char buffer[BUF_SIZE];
 	char comando[BUF_SIZE];
 	while(1){
-		printf("Qual o comado?");
-		scanf("%s",comando);
+		printf("Command: ");
+		fgets(comando,BUF_SIZE,stdin);
+		comando[strlen(comando)-1]='\0';			//removes \n from input
+
 		if (strcmp(comando,"LIST")==0){
 			write(client_fd,comando,1+strlen(comando));
 			int n_files=0;
@@ -64,12 +67,31 @@ void process_client(int client_fd){
 				buffer[nread] = '\0';
 				printf("%s",buffer);
 				}
-		}else if(strcmp(comando,"QUIT")==0){//fecha a ligaçao com o server
+		}
+		else if(strcmp(comando,"QUIT")==0){//fecha a ligaçao com o server
 			write(client_fd,comando,1+strlen(comando));
 			break;
 		}
+		else if(strcmp(strtok(comando, ' '),"DOWNLOAD")==0){
+			//deviamos estar a verificar isto no servidor e não no cliente certo?
+			char down_comm [4][BUF_SIZE/4];
+			strcpy (down_comm [0],"DOWNLOAD");
+			char* token;
+			int count =1;
+			while( (token = strtok(NULL, ' ')) ) {
+				if (count>3) break;
+				strcpy (down_comm [count],token);
+				count++;
+			}
+			if (count==3){
+				write(client_fd,down_comm,1+sizeof(down_comm));
+				//receber o download
+			}
+			//else //wrong command
+		}
 	}
 }
+
 void recebeStringBytes(int server_fd,int CLIENT){
 	FILE *write_ptr;
 	int nread;
@@ -101,10 +123,9 @@ int receive_int(int *num, int fd){
     int left = sizeof(ret);
     int rc;
     do {
-        rc = read(fd, data, left);
-
-		data += rc;
-		left -= rc;
+      rc = read(fd, data, left);
+			data += rc;
+			left -= rc;
     }while (left > 0);
     *num = ntohl(ret);
     return 0;
