@@ -19,15 +19,21 @@ int SERVER_PORT;
 int MAX_CLIENTS;
 int CURR_CLIENTS=0;
 
-void process_client(int fd, int CLIENT, struct sockaddr_in client_info);
 void erro(char *msg);
+void process_client(int fd, int CLIENT, struct sockaddr_in client_info);
 int send_int(int num, int fd);
 
 int main(int argc, char **argv) {
+
+	if (argc != 3) {
+		printf("server {port} {max number of clients} \n");
+		exit(-1);
+	}
+
+	//Server Port Max_Clients
 	SERVER_PORT=atoi(argv[1]);
 	MAX_CLIENTS=atoi(argv[2]);
-	//Server Port Max_Clients
-	
+
 	int fd, client;
 	struct sockaddr_in addr, client_addr;
 	int client_addr_size;
@@ -50,7 +56,7 @@ int main(int argc, char **argv) {
 	while(waitpid(-1,NULL,WNOHANG)>0);
 	//wait for new connection
 	while(CURR_CLIENTS>MAX_CLIENTS);
-		
+
 	client = accept(fd,(struct sockaddr *)&client_addr,(socklen_t *)&client_addr_size);//quando finalmente chega um cliente temos de guardar os seus dados numa estrutura(ip, ...). A funcao accept escreve nos seus parametros os dados dos clientes. Devolve um descritor de socket(mesmo tipo de fd) ou -1 se falhar
 	if (client > 0) {
 		CURR_CLIENTS++;
@@ -71,7 +77,7 @@ int main(int argc, char **argv) {
 	char client_ip_address[INET_ADDRSTRLEN];
 	inet_ntop(AF_INET, &client_info.sin_addr,client_ip_address, INET_ADDRSTRLEN);
 	printf("From (IP:port): %s:%d\n", client_ip_address, client_info.sin_port);
-	
+
 	int nread = 0;
 	char buffer[BUF_SIZE];
 	while(1){
@@ -81,8 +87,8 @@ int main(int argc, char **argv) {
 		buffer[nread] = '\0';
 		printf("RECEBI %s\n", buffer);//DEBUG
 		fflush(stdout);
-		
-		
+
+
 		if (strcmp(buffer,"LIST")==0){
 			char cwd[256];
 			struct dirent *dptr;
@@ -126,14 +132,14 @@ int main(int argc, char **argv) {
 		break;
 		}
 	}
-	}
+}
 
 	void erro(char *msg)
-	{
-	printf("Erro: %s\n", msg);
+{
+	perror(msg);
 	exit(-1);
 	}
-	
+
 	int send_int(int num, int fd){
     int32_t conv = htonl(num);
     char *data = (char*)&conv;
@@ -141,7 +147,7 @@ int main(int argc, char **argv) {
     int rc;
     do {
         rc = write(fd, data, left);
-        
+
 		data += rc;
 		left -= rc;
     }
@@ -154,7 +160,7 @@ int main(int argc, char **argv) {
 		bzero(temp, sizeof(temp));
 		sprintf(temp,"temp%d.bin", CLIENT);
 		read_ptr = fopen(temp,"rb");
-		
+
 		fseek(read_ptr, 0, SEEK_END);
 		unsigned long filesize = ftell(read_ptr);
 		fseek(read_ptr, 0, SEEK_SET);
@@ -170,7 +176,7 @@ int main(int argc, char **argv) {
 			stream[BUF_SIZE]='\0';
 			write(client_fd,stream,BUF_SIZE+1);
 			bzero(stream, sizeof(stream));
-			
+
 			read(client_fd, &n_received, sizeof(n_received));
 			if(n_sent!=n_received){
 				fseek(read_ptr, -BUF_SIZE, SEEK_CUR);
