@@ -13,11 +13,14 @@
 #define DEBUG 			//comment this line to remove debug comments
 
 void erro(char *msg);
-void process_client(int client_fd);
+void process_client(int client_fd, int port);
 void recebeStringBytesTCP(char *file, int server_fd);
 int readfile(int sock,char *filename);
-int receive_int(int fd);
-void send_int(int num, int fd);
+int receive_int_TCP(int fd);
+void send_int_TCP(int num, int fd);
+void handleUDP(char *file, char*type, int port);
+void send_int_UDP(int num, int fd, struct sockaddr_in addr);
+int receive_int_UDP(int fd, struct sockaddr_in addr);
 
 int main(int argc, char *argv[]) {
 	char proxyAddress[128];
@@ -35,16 +38,17 @@ int main(int argc, char *argv[]) {
 	if ((proxyHostPtr = gethostbyname(proxyAddress)) == 0)
 		erro("Couldnt get Proxy address");
 
+	int port= atoi(argv[3]);
 	memset((void *) &addr, 0, sizeof(addr));
 	addr.sin_family = AF_INET;
 	addr.sin_addr.s_addr = ((struct in_addr *)(proxyHostPtr->h_addr))->s_addr;
-	addr.sin_port = htons((short) atoi(argv[3]));			//host to network
+	addr.sin_port = htons((short) port);			//host to network
 
 	if((fd = socket(AF_INET,SOCK_STREAM,0)) == -1)
 		erro("socket");
 	if( connect(fd,(struct sockaddr *)&addr,sizeof (addr)) !=0)
 		erro("Connect");
-	process_client(fd);
+	process_client(fd, port);
 	close(fd);
 	exit(0);
 }
@@ -53,7 +57,7 @@ void erro(char *msg) {
 	perror(msg);
 	exit(-1);
 }
-void process_client(int client_fd){
+void process_client(int client_fd, int port){
 	char buffer[BUF_SIZE];
 	char command[BUF_SIZE];
 	while(1){
@@ -64,7 +68,7 @@ void process_client(int client_fd){
 
 		if (strcmp(command,"LIST")==0){
 			write(client_fd,command,1+strlen(command));
-			int n_files=receive_int(client_fd);
+			int n_files=receive_int_TCP(client_fd);
 			#ifdef DEBUG
 			printf("Num de ficheiros: %d\n",n_files);
 			#endif
@@ -103,7 +107,7 @@ void process_client(int client_fd){
 				write(client_fd,command,sizeof(command));
 
 				//receber o download
-				if(receive_int(client_fd)==0){
+				if(receive_int_TCP(client_fd)==0){
 					//wrong download command
 					printf("Command not accepted\n");
 				}
@@ -122,14 +126,7 @@ void process_client(int client_fd){
 					}
 					//UDP
 					else if (strcmp("UDP", down_comm[0])==0){
-						//not encripted
-						if (strcmp("NOR", down_comm[1])==0){
-
-						}
-						//encripted
-						else if (strcmp("ENC", down_comm[1])==0){
-
-						}
+						handleUDP(down_comm[2], down_comm[1],port);
 					}
 				}
 				//else //wrong download command /num of elements
@@ -145,7 +142,7 @@ void recebeStringBytesTCP(char *file, int server_fd){
 	unsigned char buffer[BUF_SIZE];
 	memset(buffer, 0, BUF_SIZE);
 
-	int filesize =receive_int(server_fd);
+	int filesize =receive_int_TCP(server_fd);
 	#ifdef DEBUG
 		printf("Filesize %d\n", filesize);
 	#endif
@@ -193,13 +190,98 @@ void recebeStringBytesTCP(char *file, int server_fd){
 	fclose(write_ptr);
 }
 
-int receive_int(int fd){
+int receive_int_TCP(int fd){
 	int aux=0;
   read(fd, &aux, sizeof(aux));
   return ntohl(aux);
 }
 
-void send_int(int num, int fd){
+void send_int_TCP(int num, int fd){
 	num = htonl(num);
 	write(fd, &num, sizeof(num));
+}
+
+void handleUDP(char *file, char*type, int port) {
+
+  struct sockaddr_in serv_addr;
+	//creates udp socket
+	int sockfd;
+	if ( (sockfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0 ) {
+		perror("udp socket creation has failed");
+	}
+
+	memset(&serv_addr, 0, sizeof(serv_addr));
+
+  // Filling server information
+  serv_addr.sin_family = AF_INET; // IPv4
+  serv_addr.sin_addr.s_addr = INADDR_ANY;
+  serv_addr.sin_port = htons(port);
+
+	int filesize =receive_int_UDP(sockfd,serv_addr);
+	#ifdef DEBUG
+		printf("Filesize %d\n", filesize);
+	#endif
+
+	char dir[256];
+	if(getcwd(dir, sizeof(dir)) == NULL){					//get current path
+		erro("Couldn't get current directory");
+	}
+	strcat(dir,"/Downloads/");
+	strcat(dir,file);
+
+	FILE *write_ptr;
+	write_ptr = fopen(dir, "wb+");
+
+	int nread, n_received, timeout=3;
+	unsigned char buffer[BUF_SIZE];
+	memset(buffer, 0, BUF_SIZE);
+	int total_read=0, left_size=filesize;
+	socklen_t len;
+	while(left_size>0){
+		if(left_size-total_read>BUF_SIZE){
+			n_received=BUF_SIZE;
+		}
+		else{
+			n_received=left_size%BUF_SIZE;
+		}
+		len = sizeof(serv_addr);
+		nread = recvfrom(sockfd, (char *)buffer, BUF_SIZE,  0, ( struct sockaddr *) &serv_addr, &len);
+
+		//Enviar confirmacao
+		#ifdef DEBUG
+			printf("PACOTE DE: %d\t", n_received);
+			printf("N_READ: %d\n", nread);
+		#endif
+		if(nread!=0){
+			fwrite(buffer, sizeof(unsigned char), nread, write_ptr);
+		}
+		else{
+			int n, start= time(NULL);
+			n=start;
+			while(n-start<timeout){
+				len = sizeof(serv_addr);
+				nread = recvfrom(sockfd, (char *)buffer, BUF_SIZE,  0, ( struct sockaddr *) &serv_addr, &len);
+
+				if(nread!=0){
+					fwrite(buffer, sizeof(unsigned char), nread, write_ptr);
+					break;
+				}
+				n=time(NULL);
+			}
+			break;
+		}
+		left_size-=nread;
+	}
+	fclose(write_ptr);
+}
+
+void send_int_UDP(int num, int fd, struct sockaddr_in addr){
+	sendto(fd, &num, sizeof(num),0, (const struct sockaddr *) &addr, sizeof(addr));
+}
+
+int receive_int_UDP(int fd, struct sockaddr_in addr){
+	int aux;
+	socklen_t len = sizeof(addr);
+	recvfrom(fd, &aux, sizeof(aux),  0, ( struct sockaddr *) &addr, &len);
+  return ntohl(aux);
 }

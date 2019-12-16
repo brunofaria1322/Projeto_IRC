@@ -22,10 +22,13 @@
 
 
 void erro(char *msg);
-void process_client(int fd, int client, struct sockaddr_in client_info);
+void process_client(int fd, int client, struct sockaddr_in client_info, int server_port);
 void enviaStringBytesTCP(char *file, int client_fd);
-void send_int(int num, int fd);
-int receive_int (int fd);
+void send_int_TCP(int num, int fd);
+int receive_int_TCP (int fd);
+void handleUDP(char *file, char*type, int port);
+void send_int_UDP(int num, int fd, struct sockaddr_in addr);
+int receive_int_UDP(int fd, struct sockaddr_in addr);
 
 int main(int argc, char **argv) {
 
@@ -63,7 +66,7 @@ int main(int argc, char **argv) {
 				curr_clients++;
 				if (fork() == 0) {//depois do accept faço um fork para continuar à escuta no socket principal
 					close(fd);//processo filho fecha o socket fd
-					process_client(client, curr_clients, (struct sockaddr_in) client_addr);//processa os dados do cliente
+					process_client(client, curr_clients, (struct sockaddr_in) client_addr, server_port);//processa os dados do cliente
 					curr_clients--;
 					exit(0);
 				}
@@ -77,7 +80,7 @@ int main(int argc, char **argv) {
 	return 0;
 }
 
-void process_client(int client_fd, int client, struct sockaddr_in client_info){
+void process_client(int client_fd, int client, struct sockaddr_in client_info, int server_port){
 
 	char client_ip_address[INET_ADDRSTRLEN];
 	inet_ntop(AF_INET, &client_info.sin_addr,client_ip_address, INET_ADDRSTRLEN);
@@ -115,7 +118,7 @@ void process_client(int client_fd, int client, struct sockaddr_in client_info){
 				//Se os dados a enviar excederem o tamanho do pacote vamos ter problemas
 				//Os dados podem não chegar por ordem
 			}
-			send_int(n_files, client_fd);
+			send_int_TCP(n_files, client_fd);
 			if ((dp = opendir(dir))==NULL){
 				perror("Cannot open the given directory");
 			}
@@ -166,6 +169,9 @@ void process_client(int client_fd, int client, struct sockaddr_in client_info){
 
 					while((dptr = readdir(dp))!=NULL){
 						//if it finds the file with same name
+						#ifdef DEBUG
+							printf("%s\t %s\n",dptr->d_name, down_comm[2]);
+						#endif
 						if(strcmp(dptr->d_name, down_comm[2])==0){
 							//tcp
 							if ((strcmp("TCP", down_comm[0]))==0){
@@ -177,7 +183,7 @@ void process_client(int client_fd, int client, struct sockaddr_in client_info){
 									#ifdef DEBUG
 										printf("Not encripted\n");
 									#endif
-									send_int(1,client_fd);
+									send_int_TCP(1,client_fd);
 									strcat(dir,dptr->d_name);
 									enviaStringBytesTCP(dir, client_fd);
 									break;
@@ -187,6 +193,7 @@ void process_client(int client_fd, int client, struct sockaddr_in client_info){
 									#ifdef DEBUG
 										printf("Encripted\n");
 									#endif
+									//TODO: Function
 								}
 								else printf("Nem ENC nem NOR\n");
 							}
@@ -200,12 +207,18 @@ void process_client(int client_fd, int client, struct sockaddr_in client_info){
 									#ifdef DEBUG
 										printf("Not encripted\n");
 									#endif
+
+									send_int_TCP(1,client_fd);
+									strcat(dir,dptr->d_name);
+									handleUDP(dir,down_comm[1],server_port);
 								}
 								//encripted
 								else if (strcmp("ENC", down_comm[1])==0){
 									#ifdef DEBUG
 										printf("Encripted\n");
 									#endif
+
+										handleUDP(dir,down_comm[1],server_port);
 								}
 								else printf("Nem ENC nem NOR\n");
 							}
@@ -214,19 +227,19 @@ void process_client(int client_fd, int client, struct sockaddr_in client_info){
 					}
 					//if it doesn't find the file
 					if(dptr==NULL){
-						send_int(0,client_fd);
+						send_int_TCP(0,client_fd);
 						printf("File doesnt exist\n");
 					}
 				}
 				//else //wrong download command /number of argumetns
 				else{
-					send_int(0,client_fd);
+					send_int_TCP(0,client_fd);
 					printf("Wrong download command. Invalid number of args\n");
 				}
 			}
 			//else //wrong command
 			else{
-				send_int(0,client_fd);
+				send_int_TCP(0,client_fd);
 				printf("Wrong command\n");
 			}
 		}
@@ -238,12 +251,12 @@ void erro(char *msg){
 	exit(-1);
 }
 
-void send_int(int num, int fd){
+void send_int_TCP(int num, int fd){
 	num = htonl(num);
 	write(fd, &num, sizeof(num));
 }
 
-int receive_int(int fd){
+int receive_int_TCP(int fd){
 	int aux=0;
   read(fd, &aux, sizeof(aux));
   return ntohl(aux);
@@ -262,7 +275,7 @@ void enviaStringBytesTCP(char *file, int client_fd){
 	unsigned char stream[BUF_SIZE];
 	memset(stream, 0, sizeof(stream));
 	//Send filesize
-	send_int(filesize, client_fd);
+	send_int_TCP(filesize, client_fd);
 	int n_sent,  n_received, left_size=filesize;
 	while(left_size>0){
 		if(left_size>BUF_SIZE){
@@ -276,15 +289,105 @@ void enviaStringBytesTCP(char *file, int client_fd){
 		#endif
 		fread(stream,n_received,1,read_ptr);
 
+		n_sent=write(client_fd,stream,n_received);
+		memset(stream, 0, sizeof(stream));
+
 		#ifdef DEBUG
 			printf("N_SENT: %d\n", n_sent);
 		#endif
-
-		n_sent=write(client_fd,stream,n_received);
-		memset(stream, 0, sizeof(stream));
 
 		left_size-=n_sent;
 		usleep(100);
 	}
 	fclose(read_ptr);
 }
+
+void handleUDP(char *file, char*type, int port) {
+
+  struct sockaddr_in serv_addr, prox_addr;
+	//creates udp socket
+	int sockfd;
+	if ( (sockfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0 ) {
+		perror("udp socket creation has failed");
+	}
+
+	memset(&serv_addr, 0, sizeof(serv_addr));
+  memset(&prox_addr, 0, sizeof(prox_addr));
+
+  // Filling server information
+  serv_addr.sin_family = AF_INET; // IPv4
+  serv_addr.sin_addr.s_addr = INADDR_ANY;
+  serv_addr.sin_port = htons(port);
+
+  // Bind the socket with the server address
+  if ( bind(sockfd, (const struct sockaddr *)&serv_addr,  sizeof(serv_addr)) < 0 ) {
+      perror("bind on udp socket has failed");
+  }
+
+	FILE *read_ptr;
+	read_ptr = fopen(file,"rb");
+
+	fseek(read_ptr, 0, SEEK_END);
+	unsigned int filesize = ftell(read_ptr);
+	#ifdef DEBUG
+		printf("Tamanho do ficheiro %d\n", filesize);
+	#endif
+	fseek(read_ptr, 0, SEEK_SET);
+	char stream[BUF_SIZE];
+	memset(stream, 0, sizeof(stream));
+	//send filesize
+	send_int_UDP(filesize, sockfd, prox_addr);
+	usleep(1000);
+	printf ("sent");
+	sleep(3);
+	int n_sent,  n_received, left_size=filesize;
+	//Encripted
+	if ((strcmp(type,"ENC"))==0){
+		//TODO: Function
+	}
+	//Not Encripted
+	else{
+		while(left_size>0){
+			if(left_size>BUF_SIZE){
+				n_received=BUF_SIZE;
+			}
+			else{
+				n_received=left_size%BUF_SIZE;
+			}
+			#ifdef DEBUG
+				printf("File SIZE ATUAL: %d\t", left_size);
+			#endif
+			fread(stream,n_received,1,read_ptr);
+
+			n_sent=sendto(sockfd, (const char *)stream, strlen(stream),0, (const struct sockaddr *) &prox_addr, sizeof(prox_addr));
+			memset(stream, 0, sizeof(stream));
+
+			#ifdef DEBUG
+				printf("N_SENT: %d\n", n_sent);
+			#endif
+
+			left_size-=n_sent;
+			usleep(100);
+		}
+		fclose(read_ptr);
+	}
+}
+
+void send_int_UDP(int num, int fd, struct sockaddr_in addr){
+	sendto(fd, &num, sizeof(num),0, (const struct sockaddr *) &addr, sizeof(addr));
+}
+
+int receive_int_UDP(int fd, struct sockaddr_in addr){
+	int aux;
+	socklen_t len = sizeof(addr);
+	recvfrom(fd, &aux, sizeof(aux),  0, ( struct sockaddr *) &addr, &len);
+  return ntohl(aux);
+}
+
+// len = sizeof(cliaddr);  //len is value/resuslt
+//
+// n = recvfrom(sockfd, (char *)buffer, MAXLINE,  MSG_WAITALL, ( struct sockaddr *) &cliaddr, &len);
+// buffer[n] = '\0';
+
+
+//sendto(sockfd, (const char *)hello, strlen(hello),MSG_CONFIRM, (const struct sockaddr *) &cliaddr, len);
