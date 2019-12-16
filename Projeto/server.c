@@ -367,7 +367,7 @@ void handleUDP(char *file, char*type, int port) {
 			#endif
 
 			left_size-=n_sent;
-			usleep(100);
+			usleep(200);
 		}
 		fclose(read_ptr);
 	}

@@ -23,7 +23,7 @@ int receive_intTCP(int fd);
 void send_intTCP(int num, int fd);
 void recebeStringBytesTCP(char *file, int server_fd, int client_fd);
 void process_clientTCP(int server_fd, int client_fd, struct sockaddr_in client_info);
-void initialize_connection(int client_fd, struct sockaddr_in client_info, int server_port);
+void initialize_connection(int client_fd, struct sockaddr_in client_info);
 void passBytes(int server_fd, int client_fd);
 void process_clientUDP(int server_fd, int client_fd, struct sockaddr_in client_info);
 
@@ -40,14 +40,14 @@ int main(int argc, char **argv) {
 
 	bzero((void *) &addr, sizeof(addr));
 	addr.sin_family = AF_INET;
-	addr.sin_addr.s_addr = INADDR_ANY;//ENDEREÇO DA PROXY
-	addr.sin_port = htons(server_port);//comunicacoes de rede utilizam big endian - conversão de inteiro short no host para tipo de inteiro a guardar com formato rede
+	addr.sin_addr.s_addr = INADDR_ANY;			//ENDEREÇO DA PROXY
+	addr.sin_port = htons(server_port);			//comunicacoes de rede utilizam big endian - conversão de inteiro short no host para tipo de inteiro a guardar com formato rede
 
 	if ( (fd = socket(AF_INET, SOCK_STREAM, 0)) < 0)//cria um socket - devolve -1 se falhar. SOCK_STREAM para TCP
 		erro("na funcao socket");
 	if ( bind(fd,(struct sockaddr*)&addr,sizeof(addr)) < 0)//associa um socket a um endereço, neste caso aquele que foi especificado na estrutura addr - devolve -1 se falhar
 		erro("na funcao bind");
-	if( listen(fd, 5) < 0)//aguarda ligacoes no socket, 5 sao o numero de clientes que podem estar numa queue de espera - devolve -1 se falhar
+	if( listen(fd, 5) < 0)						//aguarda ligacoes no socket, 5 sao o numero de clientes que podem estar numa queue de espera - devolve -1 se falhar
 		erro("na funcao listen");
 	client_addr_size = sizeof(client_addr);
 	while (1) {
@@ -62,15 +62,15 @@ int main(int argc, char **argv) {
 		//quando finalmente chega um cliente temos de guardar os seus dados numa estrutura(ip, ...). A funcao accept escreve nos seus parametros os dados dos clientes. Devolve um descritor de socket(mesmo tipo de fd) ou -1 se falhar
 		if (fork() == 0) {	//depois do accept faço um fork para continuar à escuta no socket principal
 			close(fd);				//processo filho fecha o socket fd
-			initialize_connection(client, (struct sockaddr_in) client_addr, server_port);//processa os dados do cliente
+			initialize_connection(client, (struct sockaddr_in) client_addr);//processa os dados do cliente
 			exit(0);
 		}
-		close(client);//fecha a ligação com o cliente se falhar
+		close(client);			//fecha a ligação com o cliente se falhar
 	}
 	return 0;
 }
 
-void initialize_connection(int client_fd, struct sockaddr_in client_info, int server_port){
+void initialize_connection(int client_fd, struct sockaddr_in client_info){
 
 	#ifdef DEBUG
 		char client_ip_address[INET_ADDRSTRLEN];
@@ -104,7 +104,7 @@ void initialize_connection(int client_fd, struct sockaddr_in client_info, int se
 	bzero((void *) &addr, sizeof(addr));
 	addr.sin_family = AF_INET;
 	addr.sin_addr.s_addr = ((struct in_addr *)(hostPtr->h_addr))->s_addr;
-	addr.sin_port = htons(server_port);
+	addr.sin_port = htons(9001);
 
 	int fd;
 	if((fd = socket(AF_INET,SOCK_STREAM,0)) == -1){
@@ -113,11 +113,10 @@ void initialize_connection(int client_fd, struct sockaddr_in client_info, int se
 
 	token = strtok(NULL, " ");
 	if((strcmp(token, "TCP"))==0){
-		printf("%s\n","kona" );
+
 		if( connect(fd,(struct sockaddr *)&addr,sizeof (addr)) < 0){
 			erro("Connect");
 		}
-			printf("%s\n","passei a kona" );
 		process_clientTCP(fd,client_fd, client_info);
 	}
 	else if ((strcmp(token, "UDP"))==0){
@@ -134,7 +133,7 @@ void erro(char *msg){
 void process_clientTCP(int server_fd, int client_fd, struct sockaddr_in client_info){
 	char command[BUF_SIZE];
 	//save
-	int save=0;
+	int save=1;
 	char buffer[BUF_SIZE];
 	while(1){
 		memset(buffer, 0, BUF_SIZE);
@@ -197,6 +196,7 @@ void process_clientTCP(int server_fd, int client_fd, struct sockaddr_in client_i
 				}
 				else{
 					printf("accepted\n");//DEBUG
+					send_intTCP(1,client_fd);
 					//TCP
 					if ((strcmp("TCP", down_comm[0]))==0){
 						//not encripted
@@ -235,6 +235,7 @@ void process_clientTCP(int server_fd, int client_fd, struct sockaddr_in client_i
 				}
 				else{
 					printf("accepted\n");//DEBUG
+					send_intTCP(1,client_fd);
 					//TCP
 					if ((strcmp("TCP", down_comm[0]))==0){
 						//not encripted
@@ -332,6 +333,7 @@ void passBytes(int server_fd, int client_fd){
 			printf("N_READ: %d\n", nread);
 		#endif
 		if(nread!=0){
+			printf("Vou escrver no file\n" );
 			fwrite(buffer, sizeof(unsigned char), nread, write_ptr);
 			write(client_fd, buffer, n_received);
 		}
@@ -350,6 +352,7 @@ void passBytes(int server_fd, int client_fd){
 			break;
 		}
 		left_size-=nread;
+		usleep(100);
 	}
 	fclose(write_ptr);
 }
