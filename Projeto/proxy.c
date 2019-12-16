@@ -133,7 +133,7 @@ void erro(char *msg){
 void process_clientTCP(int server_fd, int client_fd, struct sockaddr_in client_info){
 	char command[BUF_SIZE];
 	//save
-	int save=1;
+	int save=0;
 	char buffer[BUF_SIZE];
 	while(1){
 		memset(buffer, 0, BUF_SIZE);
@@ -171,7 +171,7 @@ void process_clientTCP(int server_fd, int client_fd, struct sockaddr_in client_i
 		else{
 			char aux_com[BUF_SIZE];
 			strcpy(aux_com,command);
-			if(strcmp(strtok(aux_com, " "),"DOWNLOAD")==0 && save==1){
+			if(strcmp(strtok(aux_com, " "),"DOWNLOAD")==0){
 				//deviamos estar a verificar isto no servidor e não no cliente certo?
 				char down_comm [3][BUF_SIZE/4];		//[protocol, encripted, name]
 				char* token;
@@ -210,45 +210,6 @@ void process_clientTCP(int server_fd, int client_fd, struct sockaddr_in client_i
 					}
 				}
 			}
-			else if(strcmp(strtok(aux_com, " "),"DOWNLOAD")==0){
-				//deviamos estar a verificar isto no servidor e não no cliente certo?
-				char down_comm [3][BUF_SIZE/4];		//[protocol, encripted, name]
-				char* token;
-				int count =-1;
-				while( (token = strtok(NULL, " ")) ) {
-					count++;
-					printf("%d\t", count);
-					printf("%s\n", token);
-					if (count>2) {
-						count++;
-						break;}
-					strcpy (down_comm [count],token);
-				}
-
-				write(server_fd,command,sizeof(command));
-
-				//receber o download
-				if(receive_intTCP(server_fd)==0){
-					send_intTCP(0,client_fd);
-					//wrong download command
-					printf("Command not accepted\n");//DEBUG
-				}
-				else{
-					printf("accepted\n");//DEBUG
-					send_intTCP(1,client_fd);
-					//TCP
-					if ((strcmp("TCP", down_comm[0]))==0){
-						//not encripted
-						if (strcmp("NOR", down_comm[1])==0){
-							passBytes(server_fd, client_fd);
-						}
-						//encripted
-						else if ((strcmp("ENC", down_comm[1])==0)){
-
-						}
-					}
-				}
-			}
 		}
 	}
 }
@@ -256,50 +217,8 @@ void process_clientTCP(int server_fd, int client_fd, struct sockaddr_in client_i
 void process_clientUDP(int server_fd, int client_fd, struct sockaddr_in client_info){
 
 }
-
-void passBytes(int server_fd, int client_fd){
-	int n_received, timeout=3;
-	unsigned char buffer[BUF_SIZE];
-	memset(buffer, 0, BUF_SIZE);
-
-	int filesize =receive_intTCP(server_fd);
-	#ifdef DEBUG
-		printf("Filesize %d\n", filesize);
-	#endif
-	send_intTCP(filesize, client_fd);
-
-	int total_read=0, left_size=filesize;
-	while(left_size>0){
-		if(left_size-total_read>BUF_SIZE){
-			n_received=BUF_SIZE;
-		}
-		else{
-			n_received=left_size%BUF_SIZE;
-		}
-		int nread = read(server_fd, buffer, n_received);
-		#ifdef DEBUG
-			printf("PACOTE DE: %d\t", n_received);
-			printf("N_READ: %d\n", nread);
-		#endif
-		write(client_fd, buffer, n_received);
-		if(nread==0){
-			int n, start= time(NULL);
-			n=start;
-			while(n-start<timeout){
-				nread = read(server_fd, buffer, n_received);
-				if(nread!=0){
-					write(client_fd, buffer, n_received);
-					break;
-				}
-				n=time(NULL);
-			}
-			break;
-		}
-		left_size-=nread;
-	}
-}
+	save=0;
 	void recebeStringBytesTCP(char *file, int server_fd, int client_fd){
-	FILE *write_ptr;
 	int nread, n_received, timeout=3;
 	unsigned char buffer[BUF_SIZE];
 	memset(buffer, 0, BUF_SIZE);
@@ -310,14 +229,16 @@ void passBytes(int server_fd, int client_fd){
 	#endif
 	send_intTCP(filesize, client_fd);
 
-	char dir[256];
-	if(getcwd(dir, sizeof(dir)) == NULL){					//get current path
-		erro("Couldn't get current directory");
+	FILE *write_ptr;
+	if (save==1){
+		char dir[256];
+		if(getcwd(dir, sizeof(dir)) == NULL){					//get current path
+			erro("Couldn't get current directory");
+		}
+		strcat(dir,"/Sniffed/");
+		strcat(dir,file);
+		write_ptr = fopen(dir, "wb+");
 	}
-	strcat(dir,"/Sniffed/");
-	strcat(dir,file);
-	write_ptr = fopen(dir, "wb+");
-
 	int total_read=0, left_size=filesize;
 	while(left_size>0){
 		if(left_size-total_read>BUF_SIZE){
@@ -334,7 +255,9 @@ void passBytes(int server_fd, int client_fd){
 		#endif
 		if(nread!=0){
 			printf("Vou escrver no file\n" );
-			fwrite(buffer, sizeof(unsigned char), nread, write_ptr);
+			if (save==1){
+				fwrite(buffer, sizeof(unsigned char), nread, write_ptr);
+			}
 			write(client_fd, buffer, n_received);
 		}
 		else{
