@@ -14,35 +14,43 @@
 
 
 #define BUF_SIZE	1024
-#define DEBUG
+#define DEBUG 			//comment this line to remove debug comments
 
-int SERVER_PORT;
-int MAX_CLIENTS;
-int CURR_CLIENTS=0;
-int sendfile(int sock, char *filename);
+//criar lista ligada para guardar os clientes que estão ativos ara o comando show
+//adicionar node a cada cliente
+//*!!!fazer antes do fork();!!!*
 
-void process_client(int fd, int CLIENT, struct sockaddr_in client_info);
+
 void erro(char *msg);
-int send_int(int num, int fd);
-void enviaStringBytes(char *file, int client_fd);
+void process_client(int fd, int client, struct sockaddr_in client_info);
+void enviaStringBytesTCP(char *file, int client_fd);
+void send_int(int num, int fd);
+int receive_int (int fd);
 
 int main(int argc, char **argv) {
+
 	if (argc != 3) {
-		printf("server <port> <max_clients>\n");
+		printf("server {port} {max number of clients} \n");
 		exit(-1);
 	}
-	SERVER_PORT=atoi(argv[1]);
-	MAX_CLIENTS=atoi(argv[2]);
+
 	//Server Port Max_Clients
-	
+	int server_port=atoi(argv[1]);
+	int max_clients=atoi(argv[2]);
+	int curr_clients=0;
+
 	int fd, client;
 	struct sockaddr_in addr, client_addr;
 	int client_addr_size;
-
-	bzero((void *) &addr, sizeof(addr));
+	struct hostent *hostPtr;
+	char endereco[100];
+	strcpy(endereco,"127.0.0.20");//ENDERECO DO SERVER
+	if ((hostPtr = gethostbyname(endereco)) == 0)
+		erro("Nao consegui obter endereço");
+	memset((void *) &addr, 0, sizeof(addr));
 	addr.sin_family = AF_INET;
-	addr.sin_addr.s_addr = htonl(INADDR_ANY);
-	addr.sin_port = htons(SERVER_PORT);//comunicacoes de rede utilizam big endian - conversão de inteiro short no host para tipo de inteiro a guardar com formato rede
+	addr.sin_addr.s_addr = ((struct in_addr *)(hostPtr->h_addr))->s_addr;
+	addr.sin_port = htons(server_port);//comunicacoes de rede utilizam big endian - conversão de inteiro short no host para tipo de inteiro a guardar com formato rede
 
 	if ( (fd = socket(AF_INET, SOCK_STREAM, 0)) < 0)//cria um socket - devolve -1 se falhar. SOCK_STREAM para TCP
 		erro("na funcao socket");
@@ -52,269 +60,235 @@ int main(int argc, char **argv) {
 		erro("na funcao listen");
 	client_addr_size = sizeof(client_addr);
 	while (1) {
-	//clean finished child processes, avoiding zombies
-	//must use WNOHANG or would block whenever a child process was working
-	while(waitpid(-1,NULL,WNOHANG)>0);
-	//wait for new connection
-	if(CURR_CLIENTS>=MAX_CLIENTS){
-		client = accept(fd,(struct sockaddr *)&client_addr,(socklen_t *)&client_addr_size);
-		if(client>0){
-		close(client);
+
+		while(curr_clients<max_clients){
+			//quando finalmente chega um cliente temos de guardar os seus dados numa estrutura(ip, ...). A funcao accept escreve nos seus parametros os dados dos clientes. Devolve um descritor de socket(mesmo tipo de fd) ou -1 se falhar
+			if ((client = accept(fd,(struct sockaddr *)&client_addr,(socklen_t *)&client_addr_size))>0) {
+				curr_clients++;
+				if (fork() == 0) {//depois do accept faço um fork para continuar à escuta no socket principal
+					close(fd);//processo filho fecha o socket fd
+					process_client(client, curr_clients, (struct sockaddr_in) client_addr);//processa os dados do cliente
+					curr_clients--;
+					exit(0);
+				}
+				//add client to lista ligada
+				close(client); //fecha a ligação com o cliente na parent
+			}
 		}
-	}else{
-	client = accept(fd,(struct sockaddr *)&client_addr,(socklen_t *)&client_addr_size);//quando finalmente chega um cliente temos de guardar os seus dados numa estrutura(ip, ...). A funcao accept escreve nos seus parametros os dados dos clientes. Devolve um descritor de socket(mesmo tipo de fd) ou -1 se falhar
-	if (client > 0) {
-		CURR_CLIENTS++;
-	if (fork() == 0) {//depois do accept faço um fork para continuar à escuta no socket principal
-		close(fd);//processo filho fecha o socket fd
-		process_client(client, CURR_CLIENTS, (struct sockaddr_in) client_addr);//processa os dados do cliente
-		CURR_CLIENTS--;
-		exit(0);
-	}
-	close(client);//fecha a ligação com o cliente se falhar
-	}
-	}
+		//foi atingido o numero maximo de client_addr_size
+		wait(NULL);				//espera pela saída de 1 cliente
 	}
 	return 0;
-	}
+}
 
-	void process_client(int client_fd, int CLIENT, struct sockaddr_in client_info){
+void process_client(int client_fd, int client, struct sockaddr_in client_info){
 
 	char client_ip_address[INET_ADDRSTRLEN];
 	inet_ntop(AF_INET, &client_info.sin_addr,client_ip_address, INET_ADDRSTRLEN);
-	printf("From (IP:port): %s:%d\n", client_ip_address, client_info.sin_port);
-	
-	int nread = 0;
+	#ifdef DEBUG
+		printf("From (IP:port): %s:%d\n", client_ip_address, client_info.sin_port);
+	#endif
+
 	char buffer[BUF_SIZE];
 	while(1){
-		bzero(buffer, BUF_SIZE);
-		nread=0;
+		memset(buffer, 0, BUF_SIZE);
+		read(client_fd, buffer, BUF_SIZE);
+		//buffer[nread] = '\0';				last line: nread=read(..., BUF_SIZE-1);
 		#ifdef DEBUG
-		printf("EM ESPERA\n");
+			printf("RECEBI %s\n", buffer);//DEBUG
 		#endif
-		nread = read(client_fd, buffer, BUF_SIZE-1);
-		buffer[nread] = '\0';
-		printf("RECEBI %s\n", buffer);//DEBUG
 		fflush(stdout);
-		
-		
+
 		if (strcmp(buffer,"LIST")==0){
-			char cwd[256];
+			char dir[256];
 			struct dirent *dptr;
 			DIR *dp = NULL;
-			if(getcwd(cwd, sizeof(cwd)) == NULL){
-				printf("No such file or directory");
-				continue;
+			if(getcwd(dir, sizeof(dir)) == NULL){					//get current path
+				erro("Couldn't get current directory");
 			}
-			strcat(cwd,"/server_files/");
-			if (NULL == (dp = opendir(cwd))){
-				printf("Cannot open the given directory %s", cwd);
-				exit(1);
+			strcat(dir,"/server_files/");
+			if ((dp = opendir(dir))==NULL){
+				perror("Cannot open the given directory");
 			}
+
 			int n_files=0;
 			while((dptr = readdir(dp))!=NULL){
-				if(dptr->d_name[0]=='.')  //Files never begin with '.'
-					continue;
-				if(dptr->d_name[0]=='.' && dptr->d_name[1]=='.')  //Files never begin with '..'
-					continue;
+				if(dptr->d_name[0]!='.')  //Files never begin with '.'
+					n_files++;;
 				//Ver como e que vamos ver os tamanhos a enviar
 				//Se os dados a enviar excederem o tamanho do pacote vamos ter problemas
 				//Os dados podem não chegar por ordem
-				n_files++;
 			}
 			send_int(n_files, client_fd);
-			if (NULL == (dp = opendir(cwd))){
-				printf("Cannot open the given directory %s", cwd);
-				exit(1);
+			if ((dp = opendir(dir))==NULL){
+				perror("Cannot open the given directory");
 			}
 			while((dptr = readdir(dp))!=NULL){
-				if(dptr->d_name[0]=='.')  //Files never begin with '.'
-					continue;
-				bzero(buffer, sizeof(buffer));
-				strcat(buffer,dptr->d_name);
-				#ifdef DEBUG
-				printf("%s\n", dptr->d_name);
-				#endif
-				write(client_fd, buffer, 1+strlen(buffer));
-				sleep(1);
+				if(dptr->d_name[0]!='.'){  //Files never begin with '.'
+					memset(buffer, 0, sizeof(buffer));
+					strcat(buffer,dptr->d_name);
+					#ifdef DEBUG
+						printf("%s\n", dptr->d_name);
+					#endif
+					write(client_fd, buffer, strlen(buffer));
+					usleep(100);
+				}
 			}
-		}else if(strcmp(buffer,"QUIT")==0){
-		close(client_fd);//fecha a ligaçao com o cliente
-		}else{
-			char *token;
-			token = strtok(buffer," ");
-			if(strcmp(token,"DOWNLOAD")==0){
-				char file[256], tipo[4], enc[4];
-				token = strtok(NULL, " ");
-				strcpy(tipo, token);
-				token = strtok(NULL, " ");
-				strcpy(enc, token);
-				token = strtok(NULL, " ");
-				strcpy(file, token);
-				#ifdef DEBUG
-				printf("TIPO: %s ENC: %s FILE: %s\n", tipo, enc, file);
-				#endif
-				char cwd[256];
-				struct dirent *dptr;
-				DIR *dp = NULL;
-				if(getcwd(cwd, sizeof(cwd)) == NULL){
-					printf("No such file or directory");
-					continue;
+		}
+		else if(strcmp(buffer,"QUIT")==0){
+			close(client_fd);//fecha a ligaçao com o cliente
+			break;
+		}
+		else{
+			char aux_com[BUF_SIZE];
+			strcpy(aux_com,buffer);
+			if(strcmp(strtok(aux_com, " "),"DOWNLOAD")==0){
+				char down_comm [3][BUF_SIZE/4];		//[protocol, encripted, name]
+				char* token;
+				int count =-1;
+				while( (token = strtok(NULL, " ")) ) {
+					count++;
+					printf("%d\t", count);
+					printf("%s\n", token);
+					if (count>2) {
+						count++;
+						break;}
+					strcpy (down_comm [count],token);
 				}
-				strcat(cwd,"/server_files/");
-				if (NULL == (dp = opendir(cwd))){
-					printf("Cannot open the given directory %s", cwd);
-					exit(1);
-				}
-				while((dptr = readdir(dp))!=NULL){
-					if(dptr->d_name[0]=='.')  //Files never begin with '.'
-						continue;
-					if(strcmp(dptr->d_name, file)==0){//Se encontrar o ficheiro
-						send_int(1,client_fd);
-						strcat(cwd,dptr->d_name);
-						enviaStringBytes(cwd, client_fd);
-						break;
+				if (count==2){
+
+					char dir[256];
+					struct dirent *dptr;
+					DIR *dp = NULL;
+					if(getcwd(dir, sizeof(dir)) == NULL){					//get current path
+						erro("Couldn't get current directory");
+					}
+					strcat(dir,"/server_files/");
+					if ((dp = opendir(dir))==NULL){
+						perror("Cannot open the given directory");
+					}
+
+					while((dptr = readdir(dp))!=NULL){
+						//if it finds the file with same name
+						if(strcmp(dptr->d_name, down_comm[2])==0){
+							//tcp
+							if ((strcmp("TCP", down_comm[0]))==0){
+								#ifdef DEBUG
+									printf("TCP\n");
+								#endif
+								//not encripted
+								if (strcmp("NOR", down_comm[1])==0){
+									#ifdef DEBUG
+										printf("Not encripted\n");
+									#endif
+									send_int(1,client_fd);
+									strcat(dir,dptr->d_name);
+									enviaStringBytesTCP(dir, client_fd);
+									break;
+								}
+								//encripted
+								else if (strcmp("ENC", down_comm[1])==0){
+									#ifdef DEBUG
+										printf("Encripted\n");
+									#endif
+								}
+								else printf("Nem ENC nem NOR\n");
+							}
+							//udp
+							else if (strcmp("UDP", down_comm[0])==0){
+								//not encripted
+								#ifdef DEBUG
+									printf("UDP\n");
+								#endif
+								if (strcmp("NOR", down_comm[1])==0){
+									#ifdef DEBUG
+										printf("Not encripted\n");
+									#endif
+								}
+								//encripted
+								else if (strcmp("ENC", down_comm[1])==0){
+									#ifdef DEBUG
+										printf("Encripted\n");
+									#endif
+								}
+								else printf("Nem ENC nem NOR\n");
+							}
+							else printf("Nem TCP nem UDP\n");
 						}
-				}
-				if(dptr==NULL){//Não encontrou o ficheiro
-					send_int(0,client_fd);
 					}
-			}else{
-				//COMANDO DESCONHECIDO
-				printf("Unknown command received\n");
+					//if it doesn't find the file
+					if(dptr==NULL){
+						send_int(0,client_fd);
+						printf("File doesnt exist\n");
+					}
+				}
+				//else //wrong download command /number of argumetns
+				else{
+					send_int(0,client_fd);
+					printf("Wrong download command. Invalid number of args\n");
 				}
 			}
+			//else //wrong command
+			else{
+				send_int(0,client_fd);
+				printf("Wrong command\n");
+			}
+		}
 	}
-	}
+}
 
-	void erro(char *msg)
-	{
-	printf("Erro: %s\n", msg);
+void erro(char *msg){
+	perror(msg);
 	exit(-1);
-	}
-	
-	void enviaStringBytes(char *file, int client_fd){
-		FILE *read_ptr;
-		read_ptr = fopen(file,"rb");
-		if(read_ptr == NULL)
-	   {
-		  printf("Error!");   
-		  exit(1);             
-		}
-		
-		fseek(read_ptr, 0, SEEK_END);
-		int filesize = ftell(read_ptr);
-		#ifdef DEBUG
+}
+
+void send_int(int num, int fd){
+	num = htonl(num);
+	write(fd, &num, sizeof(num));
+}
+
+int receive_int(int fd){
+	int aux=0;
+  read(fd, &aux, sizeof(aux));
+  return ntohl(aux);
+}
+
+void enviaStringBytesTCP(char *file, int client_fd){
+	FILE *read_ptr;
+	read_ptr = fopen(file,"rb");
+
+	fseek(read_ptr, 0, SEEK_END);
+	unsigned int filesize = ftell(read_ptr);
+	#ifdef DEBUG
 		printf("Tamanho do ficheiro %d\n", filesize);
+	#endif
+	fseek(read_ptr, 0, SEEK_SET);
+	unsigned char stream[BUF_SIZE];
+	memset(stream, 0, sizeof(stream));
+	//Send filesize
+	send_int(filesize, client_fd);
+	int n_sent,  n_received, left_size=filesize;
+	while(left_size>0){
+		if(left_size>BUF_SIZE){
+			n_received=BUF_SIZE;
+		}
+		else{
+			n_received=left_size%BUF_SIZE;
+		}
+		#ifdef DEBUG
+			printf("File SIZE ATUAL: %d\t", left_size);
 		#endif
-		int fsize=filesize;
-		fseek(read_ptr, 0, SEEK_SET);
-		unsigned char *stream;
-		stream=(unsigned char*)malloc(BUF_SIZE*sizeof(unsigned char));
-		//Send filesize
-		filesize = htonl(filesize);
-		// Write the number to the opened socket
-		write(client_fd, &filesize, sizeof(filesize));
-		int n_sent;
-		int n_received;
-		while(fsize>0){
-			n_sent=0;
-			n_received=0;
-			if(fsize/BUF_SIZE>0){
-				n_received=BUF_SIZE;
-				}else{
-					n_received=fsize%BUF_SIZE;
-					}
-			#ifdef DEBUG
-			printf("FSIZE ATUAL: %d\t", fsize);
-			#endif
-			n_sent=fread(stream,sizeof(unsigned char),n_received,read_ptr);
-			#ifdef DEBUG
+		fread(stream,n_received,1,read_ptr);
+
+		#ifdef DEBUG
 			printf("N_SENT: %d\n", n_sent);
-			#endif
-			write(client_fd,stream,BUF_SIZE);
-			usleep(100);
+		#endif
 
-			fsize=fsize-BUF_SIZE;//Continua
-		}
-		fclose(read_ptr);
-		free(stream);
-		}
+		n_sent=write(client_fd,stream,n_received);
+		memset(stream, 0, sizeof(stream));
 
-	int send_int(int num, int fd){
-    int32_t conv = htonl(num);
-    char *data = (char*)&conv;
-    int left = sizeof(conv);
-    int rc;
-    do {
-        rc = write(fd, data, left);
-        
-		data += rc;
-		left -= rc;
-    }
-    while (left > 0);
-    return 0;
-}
-
-int receive_int(int *num, int fd){
-    int32_t ret;
-    char *data = (char*)&ret;
-    int left = sizeof(ret);
-    int rc;
-    do {
-        rc = read(fd, data, left);
-            
-		data += rc;
-		left -= rc;
-    }while (left > 0);
-    *num = ntohl(ret);
-    return 0;
-}
-
-int senddata(int sock, void *buf, int buflen){
-    unsigned char *pbuf = (unsigned char *) buf;
-    while (buflen > 0)
-    {
-        int num = write(sock, pbuf, buflen);
-        sleep(1);
-
-        pbuf += num;
-        buflen -= num;
-    }
-
-    return 1;
-}
-
-int sendlong(int sock, long value)
-{
-    value = htonl(value);
-    return senddata(sock, &value, sizeof(value));
-}
-
-int sendfile(int sock, char *filename)
-{
-	FILE *f = fopen(filename,"rb");
-    fseek(f, 0, SEEK_END);
-    long filesize = ftell(f);
-    rewind(f);
-    if (filesize == EOF)
-        return 0;
-    if (!sendlong(sock, filesize))
-        return 0;
-    if (filesize > 0)
-    {
-        char buffer[BUF_SIZE];
-        do
-        {
-            int num = BUF_SIZE%filesize;
-            num = fread(buffer, 1, num, f);
-            if (num < 1)
-                return 0;
-            if (!senddata(sock, buffer, num))
-                return 0;
-            filesize -= num;
-        }
-        while (filesize > 0);
-    }
-    return 1;
+		left_size-=n_sent;
+		usleep(100);
+	}
+	fclose(read_ptr);
 }
