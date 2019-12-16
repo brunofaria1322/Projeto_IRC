@@ -14,7 +14,7 @@
 
 void erro(char *msg);
 void process_client(int client_fd);
-void recebeStringBytes(char *file, int server_fd);
+void recebeStringBytesTCP(char *file, int server_fd);
 int readfile(int sock,char *filename);
 int receive_int(int fd);
 void send_int(int num, int fd);
@@ -87,15 +87,19 @@ void process_client(int client_fd){
 
 			if(strcmp(strtok(aux_com, " "),"DOWNLOAD")==0){
 				//deviamos estar a verificar isto no servidor e não no cliente certo?
-				char file [BUF_SIZE/4];
+				char down_comm [3][BUF_SIZE/4];		//[protocol, encripted, name]
 				char* token;
-				int count =0;
-
-				while( (token = strtok(NULL, " "))) {
-					if (count>2) break;
-					else if (count==2) strcpy(file,token);
+				int count =-1;
+				while( (token = strtok(NULL, " ")) ) {
 					count++;
+					printf("%d\t", count);
+					printf("%s\n", token);
+					if (count>2) {
+						count++;
+						break;}
+					strcpy (down_comm [count],token);
 				}
+
 				write(client_fd,command,sizeof(command));
 
 				//receber o download
@@ -105,7 +109,28 @@ void process_client(int client_fd){
 				}
 				else{
 					printf("accepted\n");
-					recebeStringBytes(file, client_fd);
+					//TCP
+					if ((strcmp("TCP", down_comm[0]))==0){
+						//not encripted
+						if (strcmp("NOR", down_comm[1])==0){
+							recebeStringBytesTCP(down_comm[2], client_fd);
+						}
+						//encripted
+						else if (strcmp("ENC", down_comm[1])==0){
+
+						}
+					}
+					//UDP
+					else if (strcmp("UDP", down_comm[0])==0){
+						//not encripted
+						if (strcmp("NOR", down_comm[1])==0){
+
+						}
+						//encripted
+						else if (strcmp("ENC", down_comm[1])==0){
+
+						}
+					}
 				}
 				//else //wrong download command /num of elements
 			}
@@ -114,7 +139,7 @@ void process_client(int client_fd){
 	}
 }
 
-void recebeStringBytes(char *file, int server_fd){
+void recebeStringBytesTCP(char *file, int server_fd){
 	FILE *write_ptr;
 	int nread, n_received, timeout=3;
 	unsigned char buffer[BUF_SIZE];

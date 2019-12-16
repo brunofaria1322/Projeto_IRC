@@ -23,7 +23,7 @@
 
 void erro(char *msg);
 void process_client(int fd, int client, struct sockaddr_in client_info);
-void enviaStringBytes(char *file, int client_fd);
+void enviaStringBytesTCP(char *file, int client_fd);
 void send_int(int num, int fd);
 int receive_int (int fd);
 
@@ -139,7 +139,7 @@ void process_client(int client_fd, int client, struct sockaddr_in client_info){
 			char aux_com[BUF_SIZE];
 			strcpy(aux_com,buffer);
 			if(strcmp(strtok(aux_com, " "),"DOWNLOAD")==0){
-				char down_comm [3][BUF_SIZE/4];
+				char down_comm [3][BUF_SIZE/4];		//[protocol, encripted, name]
 				char* token;
 				int count =-1;
 				while( (token = strtok(NULL, " ")) ) {
@@ -179,7 +179,7 @@ void process_client(int client_fd, int client, struct sockaddr_in client_info){
 									#endif
 									send_int(1,client_fd);
 									strcat(dir,dptr->d_name);
-									enviaStringBytes(dir, client_fd);
+									enviaStringBytesTCP(dir, client_fd);
 									break;
 								}
 								//encripted
@@ -249,7 +249,7 @@ int receive_int(int fd){
   return ntohl(aux);
 }
 
-void enviaStringBytes(char *file, int client_fd){
+void enviaStringBytesTCP(char *file, int client_fd){
 	FILE *read_ptr;
 	read_ptr = fopen(file,"rb");
 
