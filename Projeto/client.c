@@ -48,6 +48,17 @@ int main(int argc, char *argv[]) {
 		erro("socket");
 	if( connect(fd,(struct sockaddr *)&addr,sizeof (addr)) !=0)
 		erro("Connect");
+
+	char buffer[BUF_SIZE];
+	memset(buffer, 0, BUF_SIZE);
+
+	strcat(buffer,argv[2]);
+	strcat(buffer," ");
+	strcat(buffer,argv[4]);
+
+
+	write(fd, buffer,1+strlen(buffer));
+
 	process_client(fd, port, proxyHostPtr);
 	close(fd);
 	exit(0);
