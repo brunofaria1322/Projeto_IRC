@@ -124,7 +124,7 @@ void process_client(int client_fd, int client, struct sockaddr_in client_info){
 					memset(buffer, 0, sizeof(buffer));
 					strcat(buffer,dptr->d_name);
 					#ifdef DEBUG
-					printf("%s\n", dptr->d_name);
+						printf("%s\n", dptr->d_name);
 					#endif
 					write(client_fd, buffer, strlen(buffer));
 					usleep(100);
@@ -141,17 +141,17 @@ void process_client(int client_fd, int client, struct sockaddr_in client_info){
 			if(strcmp(strtok(aux_com, " "),"DOWNLOAD")==0){
 				char down_comm [3][BUF_SIZE/4];
 				char* token;
-				int count =0;
+				int count =-1;
 				while( (token = strtok(NULL, " ")) ) {
+					count++;
 					printf("%d\t", count);
 					printf("%s\n", token);
 					if (count>2) {
 						count++;
 						break;}
 					strcpy (down_comm [count],token);
-					count++;
 				}
-				if (count==3){
+				if (count==2){
 
 					char dir[256];
 					struct dirent *dptr;
@@ -168,7 +168,7 @@ void process_client(int client_fd, int client, struct sockaddr_in client_info){
 						//if it finds the file with same name
 						if(strcmp(dptr->d_name, down_comm[2])==0){
 							//tcp
-							if (strcmp("TCP", down_comm[0])){
+							if ((strcmp("TCP", down_comm[0]))==0){
 								#ifdef DEBUG
 									printf("TCP\n");
 								#endif
@@ -182,12 +182,13 @@ void process_client(int client_fd, int client, struct sockaddr_in client_info){
 									enviaStringBytes(dir, client_fd);
 									break;
 								}
-									//encripted
+								//encripted
 								else if (strcmp("ENC", down_comm[1])==0){
 									#ifdef DEBUG
 										printf("Encripted\n");
 									#endif
 								}
+								else printf("Nem ENC nem NOR\n");
 							}
 							//udp
 							else if (strcmp("UDP", down_comm[0])==0){
@@ -206,7 +207,9 @@ void process_client(int client_fd, int client, struct sockaddr_in client_info){
 										printf("Encripted\n");
 									#endif
 								}
+								else printf("Nem ENC nem NOR\n");
 							}
+							else printf("Nem TCP nem UDP\n");
 						}
 					}
 					//if it doesn't find the file
@@ -271,13 +274,13 @@ void enviaStringBytes(char *file, int client_fd){
 		#ifdef DEBUG
 			printf("File SIZE ATUAL: %d\t", left_size);
 		#endif
-		n_sent=fread(stream,n_received,1,read_ptr);
+		fread(stream,n_received,1,read_ptr);
 
 		#ifdef DEBUG
 			printf("N_SENT: %d\n", n_sent);
 		#endif
 
-		write(client_fd,stream,n_received);
+		n_sent=write(client_fd,stream,n_received);
 		memset(stream, 0, sizeof(stream));
 
 		left_size-=n_sent;
