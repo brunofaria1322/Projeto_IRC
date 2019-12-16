@@ -23,9 +23,9 @@
 
 void erro(char *msg);
 void process_client(int fd, int client, struct sockaddr_in client_info);
+void enviaStringBytes(char *file, int client_fd);
 void send_int(int num, int fd);
 int receive_int (int fd);
-void enviaStringBytes(char *file, int client_fd);
 
 int main(int argc, char **argv) {
 
@@ -85,12 +85,11 @@ void process_client(int client_fd, int client, struct sockaddr_in client_info){
 		printf("From (IP:port): %s:%d\n", client_ip_address, client_info.sin_port);
 	#endif
 
-	int nread = 0;
 	char buffer[BUF_SIZE];
 	while(1){
 		memset(buffer, 0, BUF_SIZE);
-		nread = read(client_fd, buffer, BUF_SIZE);
-		//buffer[nread] = '\0';				last line: BUF_SIZE-1
+		read(client_fd, buffer, BUF_SIZE);
+		//buffer[nread] = '\0';				last line: nread=read(..., BUF_SIZE-1);
 		#ifdef DEBUG
 			printf("RECEBI %s\n", buffer);//DEBUG
 		#endif
@@ -121,7 +120,7 @@ void process_client(int client_fd, int client, struct sockaddr_in client_info){
 				perror("Cannot open the given directory");
 			}
 			while((dptr = readdir(dp))!=NULL){
-				if(dptr->d_name[0]!='.')  //Files never begin with '.'
+				if(dptr->d_name[0]!='.'){  //Files never begin with '.'
 					memset(buffer, 0, sizeof(buffer));
 					strcat(buffer,dptr->d_name);
 					#ifdef DEBUG
@@ -129,6 +128,7 @@ void process_client(int client_fd, int client, struct sockaddr_in client_info){
 					#endif
 					write(client_fd, buffer, strlen(buffer));
 					usleep(100);
+				}
 			}
 		}
 		else if(strcmp(buffer,"QUIT")==0){
@@ -137,17 +137,21 @@ void process_client(int client_fd, int client, struct sockaddr_in client_info){
 		}
 		else{
 			char aux_com[BUF_SIZE];
-			strcpy(aux_com,command);
-			if(strcmp(strtok(aux_com, ' '),"DOWNLOAD")==0){
+			strcpy(aux_com,buffer);
+			if(strcmp(strtok(aux_com, " "),"DOWNLOAD")==0){
 				char down_comm [3][BUF_SIZE/4];
 				char* token;
 				int count =0;
-				while( (token = strtok(NULL, ' ')) ) {
-					if (count>2) break;
+				while( (token = strtok(NULL, " ")) ) {
+					printf("%d\t", count);
+					printf("%s\n", token);
+					if (count>2) {
+						count++;
+						break;}
 					strcpy (down_comm [count],token);
 					count++;
 				}
-				if (count==2){
+				if (count==3){
 
 					char dir[256];
 					struct dirent *dptr;
@@ -164,12 +168,12 @@ void process_client(int client_fd, int client, struct sockaddr_in client_info){
 						//if it finds the file with same name
 						if(strcmp(dptr->d_name, down_comm[2])==0){
 							//tcp
-							if (strcmp("TCP", down_comm[0]){
+							if (strcmp("TCP", down_comm[0])){
 								#ifdef DEBUG
 									printf("TCP\n");
 								#endif
 								//not encripted
-								if (strcmp("NOR", down_comm[1]){
+								if (strcmp("NOR", down_comm[1])==0){
 									#ifdef DEBUG
 										printf("Not encripted\n");
 									#endif
@@ -179,25 +183,25 @@ void process_client(int client_fd, int client, struct sockaddr_in client_info){
 									break;
 								}
 									//encripted
-								else if (strcmp("ENC", down_comm[1]){
+								else if (strcmp("ENC", down_comm[1])==0){
 									#ifdef DEBUG
 										printf("Encripted\n");
 									#endif
 								}
 							}
 							//udp
-							else if (strcmp("UDP", down_comm[0]){
+							else if (strcmp("UDP", down_comm[0])==0){
 								//not encripted
 								#ifdef DEBUG
 									printf("UDP\n");
 								#endif
-								if (strcmp("NOR", down_comm[1]){
+								if (strcmp("NOR", down_comm[1])==0){
 									#ifdef DEBUG
 										printf("Not encripted\n");
 									#endif
 								}
 								//encripted
-								else if (strcmp("ENC", down_comm[1]){
+								else if (strcmp("ENC", down_comm[1])==0){
 									#ifdef DEBUG
 										printf("Encripted\n");
 									#endif
@@ -208,11 +212,20 @@ void process_client(int client_fd, int client, struct sockaddr_in client_info){
 					//if it doesn't find the file
 					if(dptr==NULL){
 						send_int(0,client_fd);
+						printf("File doesnt exist\n");
 					}
 				}
 				//else //wrong download command /number of argumetns
+				else{
+					send_int(0,client_fd);
+					printf("Wrong download command. Invalid number of args\n");
+				}
 			}
 			//else //wrong command
+			else{
+				send_int(0,client_fd);
+				printf("Wrong command\n");
+			}
 		}
 	}
 }
@@ -224,7 +237,7 @@ void erro(char *msg){
 
 void send_int(int num, int fd){
 	num = htonl(num);
-	write(client_fd, &num, sizeof(num));
+	write(fd, &num, sizeof(num));
 }
 
 int receive_int(int fd){
@@ -249,7 +262,7 @@ void enviaStringBytes(char *file, int client_fd){
 	send_int(filesize, client_fd);
 	int n_sent,  n_received, left_size=filesize;
 	while(left_size>0){
-		if(left_size-total_read>BUF_SIZE){
+		if(left_size>BUF_SIZE){
 			n_received=BUF_SIZE;
 		}
 		else{
@@ -258,13 +271,13 @@ void enviaStringBytes(char *file, int client_fd){
 		#ifdef DEBUG
 			printf("File SIZE ATUAL: %d\t", left_size);
 		#endif
-		n_sent=fread(stream,BUF_SIZE,1,read_ptr);
+		n_sent=fread(stream,n_received,1,read_ptr);
 
 		#ifdef DEBUG
 			printf("N_SENT: %d\n", n_sent);
 		#endif
 
-		write(client_fd,stream,BUF_SIZE);
+		write(client_fd,stream,n_received);
 		memset(stream, 0, sizeof(stream));
 
 		left_size-=n_sent;

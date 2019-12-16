@@ -14,10 +14,10 @@
 
 void erro(char *msg);
 void process_client(int client_fd);
-int receive_int(int fd);
-int send_int(int num, int fd);
-int recebeStringBytes(char *file, int server_fd);
+void recebeStringBytes(char *file, int server_fd);
 int readfile(int sock,char *filename);
+int receive_int(int fd);
+void send_int(int num, int fd);
 
 int main(int argc, char *argv[]) {
 	char proxyAddress[128];
@@ -54,17 +54,16 @@ void erro(char *msg) {
 	exit(-1);
 }
 void process_client(int client_fd){
-	int nread;
 	char buffer[BUF_SIZE];
-	char comando[BUF_SIZE];
+	char command[BUF_SIZE];
 	while(1){
 		printf("Enter command!\n");
-		fgets(comando,BUF_SIZE,stdin);
+		fgets(command,BUF_SIZE,stdin);
 		fflush(stdin);
-		comando[strlen(comando)-1]='\0';			//removes \n from input
+		command[strlen(command)-1]='\0';			//removes \n from input
 
-		if (strcmp(comando,"LIST")==0){
-			write(client_fd,comando,1+strlen(comando));
+		if (strcmp(command,"LIST")==0){
+			write(client_fd,command,1+strlen(command));
 			int n_files=receive_int(client_fd);
 			#ifdef DEBUG
 			printf("Num de ficheiros: %d\n",n_files);
@@ -73,36 +72,40 @@ void process_client(int client_fd){
 			printf("Os ficheiros existentes para download são:\n");
 			for(int i=0; i<n_files; i++){
 				memset(buffer, 0, BUF_SIZE);
-				nread = read(client_fd, buffer, BUF_SIZE);
-				//buffer[nread] = '\0';				last line: BUF_SIZE-1
-				printf("%s",buffer);
+				read(client_fd, buffer, BUF_SIZE);
+				//buffer[nread] = '\0';				last line: nread=read(..., BUF_SIZE-1);
+				printf("%s\n",buffer);
 				}
 		}
-		else if(strcmp(comando,"QUIT")==0){//fecha a ligaçao com o server
-			write(client_fd,comando,1+strlen(comando));
+		else if(strcmp(command,"QUIT")==0){//fecha a ligaçao com o server
+			write(client_fd,command,1+strlen(command));
 			break;
 		}
 		else{
 			char aux_com[BUF_SIZE];
 			strcpy(aux_com,command);
-			if(strcmp(strtok(aux_com, ' '),"DOWNLOAD")==0){
+
+			if(strcmp(strtok(aux_com, " "),"DOWNLOAD")==0){
 				//deviamos estar a verificar isto no servidor e não no cliente certo?
+				char file [BUF_SIZE/4];
 				char* token;
-				int count =1;
-				while( (token = strtok(NULL, ' ')) ) {
-					if (count>3) break;
+				int count =0;
+
+				while( (token = strtok(NULL, " "))) {
+					if (count>2) break;
+					else if (count==2) strcpy(file,token);
 					count++;
 				}
-				if (count==3){
-					write(client_fd,command,sizeof(command));
-					//receber o download
-					if(receive_int(client_fd)==0){
-						//wrong download command
-						printf("Command not accepted\n");
-					}
-					else{
-						recebeStringBytes(saved, client_fd);
-					}
+				write(client_fd,command,sizeof(command));
+
+				//receber o download
+				if(receive_int(client_fd)==0){
+					//wrong download command
+					printf("Command not accepted\n");
+				}
+				else{
+					printf("accepted\n");
+					recebeStringBytes(file, client_fd);
 				}
 				//else //wrong download command /num of elements
 			}
@@ -111,7 +114,7 @@ void process_client(int client_fd){
 	}
 }
 
-void recebeStringBytes(char *file, int server_fd, int filesize){
+void recebeStringBytes(char *file, int server_fd){
 	FILE *write_ptr;
 	int nread, n_received, timeout=3;
 	unsigned char buffer[BUF_SIZE];
@@ -148,21 +151,21 @@ void recebeStringBytes(char *file, int server_fd, int filesize){
 			fwrite(buffer, sizeof(unsigned char), nread, write_ptr);
 		}
 		else{
-			int n= start= time(NULL);
+			int n, start= time(NULL);
+			n=start;
 			while(n-start<timeout){
-			nread = read(server_fd, buffer, n_received);
-			if(nread!=0){
-				fwrite(buffer, sizeof(unsigned char), nread, write_ptr);
-				break;
+				nread = read(server_fd, buffer, n_received);
+				if(nread!=0){
+					fwrite(buffer, sizeof(unsigned char), nread, write_ptr);
+					break;
 				}
-			n=time(NULL);
+				n=time(NULL);
 			}
 			break;
 		}
+		left_size-=nread;
 	}
 	fclose(write_ptr);
-	return 0;
-	left_size-=nread;
 }
 
 int receive_int(int fd){
@@ -173,5 +176,5 @@ int receive_int(int fd){
 
 void send_int(int num, int fd){
 	num = htonl(num);
-	write(client_fd, &num, sizeof(num));
+	write(fd, &num, sizeof(num));
 }
