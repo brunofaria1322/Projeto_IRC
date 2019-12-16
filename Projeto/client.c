@@ -7,15 +7,17 @@
 #include <unistd.h>
 #include <netdb.h>
 #include <dirent.h> //Para ler pastas
+#include <time.h>
 
 #define BUF_SIZE	1024
-#define DEBUG 			//comment tjis line to remove debug comments
+#define DEBUG 			//comment this line to remove debug comments
 
 void erro(char *msg);
 void process_client(int client_fd);
 int receive_int(int fd);
 int send_int(int num, int fd);
-int recebeStringBytes(char *file, int server_fd, int filesize);
+int recebeStringBytes(char *file, int server_fd);
+int readfile(int sock,char *filename);
 
 int main(int argc, char *argv[]) {
 	char proxyAddress[128];
@@ -33,7 +35,7 @@ int main(int argc, char *argv[]) {
 	if ((proxyHostPtr = gethostbyname(proxyAddress)) == 0)
 		erro("Couldnt get Proxy address");
 
-	bzero((void *) &addr, sizeof(addr));
+	memset((void *) &addr, 0, sizeof(addr));
 	addr.sin_family = AF_INET;
 	addr.sin_addr.s_addr = ((struct in_addr *)(proxyHostPtr->h_addr))->s_addr;
 	addr.sin_port = htons((short) atoi(argv[3]));			//host to network
@@ -56,17 +58,23 @@ void process_client(int client_fd){
 	char buffer[BUF_SIZE];
 	char comando[BUF_SIZE];
 	while(1){
+		printf("Enter command!\n");
 		fgets(comando,BUF_SIZE,stdin);
+		fflush(stdin);
 		comando[strlen(comando)-1]='\0';			//removes \n from input
 
 		if (strcmp(comando,"LIST")==0){
 			write(client_fd,comando,1+strlen(comando));
 			int n_files=receive_int(client_fd);
+			#ifdef DEBUG
+			printf("Num de ficheiros: %d\n",n_files);
+			#endif
 
 			printf("Os ficheiros existentes para download são:\n");
 			for(int i=0; i<n_files; i++){
-				bzero(buffer, BUF_SIZE);
+				memset(buffer, 0, BUF_SIZE);
 				nread = read(client_fd, buffer, BUF_SIZE);
+				//buffer[nread] = '\0';				last line: BUF_SIZE-1
 				printf("%s",buffer);
 				}
 		}
@@ -89,13 +97,14 @@ void process_client(int client_fd){
 					write(client_fd,command,sizeof(command));
 					//receber o download
 					if(receive_int(client_fd)==0){
-						printf("Ocorreu um erro a encontrar o ficheiro\n");
+						//wrong download command
+						printf("Command not accepted\n");
 					}
 					else{
 						recebeStringBytes(saved, client_fd);
 					}
 				}
-				//else //wrong download command
+				//else //wrong download command /num of elements
 			}
 			//else //wrong command
 		}
@@ -104,55 +113,65 @@ void process_client(int client_fd){
 
 void recebeStringBytes(char *file, int server_fd, int filesize){
 	FILE *write_ptr;
-	int nread;
-	char buffer[BUF_SIZE];
-	bzero(buffer, BUF_SIZE);
-	nread=0;
-	receive_int(server_fd);			//porque??? não pedes já o tamanho na linha 92
+	int nread, n_received, timeout=3;
+	unsigned char buffer[BUF_SIZE];
+	memset(buffer, 0, BUF_SIZE);
+
+	int filesize =receive_int(server_fd);
 	#ifdef DEBUG
-		printf("Filesize %d\n", aux);//DEBUG
+		printf("Filesize %d\n", filesize);
 	#endif
+
 	char dir[256];
 	if(getcwd(dir, sizeof(dir)) == NULL){					//get current path
 		erro("Couldn't get current directory");
 	}
 	strcat(dir,"/Downloads/");
-	strcat(cwd,file);
-	write_ptr = fopen(cwd, "wb+");
+	strcat(dir,file);
+	write_ptr = fopen(dir, "wb+");
 
-	int total_read=0
-	while((nread = read(server_fd, buffer, BUF_SIZE))!=0){
-		total_read +=nread;
+	int total_read=0, left_size=filesize;
+	while(left_size>0){
+		if(left_size-total_read>BUF_SIZE){
+			n_received=BUF_SIZE;
+		}
+		else{
+			n_received=left_size%BUF_SIZE;
+		}
+		nread = read(server_fd, buffer, n_received);
 		//Enviar confirmacao
-		send_int(nread, server_fd);
-
-		fwrite(buffer, nread,1, write_ptr);
+		#ifdef DEBUG
+			printf("PACOTE DE: %d\t", n_received);
+			printf("N_READ: %d\n", nread);
+		#endif
+		if(nread!=0){
+			fwrite(buffer, sizeof(unsigned char), nread, write_ptr);
+		}
+		else{
+			int n= start= time(NULL);
+			while(n-start<timeout){
+			nread = read(server_fd, buffer, n_received);
+			if(nread!=0){
+				fwrite(buffer, sizeof(unsigned char), nread, write_ptr);
+				break;
+				}
+			n=time(NULL);
+			}
+			break;
+		}
 	}
 	fclose(write_ptr);
 	return 0;
+	left_size-=nread;
 }
 
 int receive_int(int fd){
-    int32_t ret;
-    char *data = (char*)&ret;
-    int left = sizeof(ret);
-    int rc;
-    do {
-      rc = read(fd, data, left);
-			data += rc;
-			left -= rc;
-    }while (left > 0);
-    return ntohl(ret);
+	int aux=0;
+  read(fd, &aux, sizeof(aux));
+  return ntohl(aux);
 }
 
 void send_int(int num, int fd){
-	int32_t conv = htonl(num);
-	char *data = (char*)&conv;
-	int left = sizeof(conv);
-	int rc;
-	do {
-		rc = write(fd, data, left);
-		data += rc;
-		left -= rc;
-	}while (left > 0);
+	num = htonl(num);
+	write(client_fd, &num, sizeof(num));
 }

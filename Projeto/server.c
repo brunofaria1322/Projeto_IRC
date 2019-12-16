@@ -14,10 +14,12 @@
 
 
 #define BUF_SIZE	1024
+#define DEBUG 			//comment this line to remove debug comments
 
-int SERVER_PORT;
-int MAX_CLIENTS;
-int CURR_CLIENTS=0;
+//criar lista ligada para guardar os clientes que estão ativos ara o comando show
+//adicionar node a cada cliente
+//*!!!fazer antes do fork();!!!*
+
 
 void erro(char *msg);
 void process_client(int fd, int client, struct sockaddr_in client_info);
@@ -33,17 +35,18 @@ int main(int argc, char **argv) {
 	}
 
 	//Server Port Max_Clients
-	SERVER_PORT=atoi(argv[1]);
-	MAX_CLIENTS=atoi(argv[2]);
+	int server_port=atoi(argv[1]);
+	int max_clients=atoi(argv[2]);
+	int curr_clients=0;
 
 	int fd, client;
 	struct sockaddr_in addr, client_addr;
 	int client_addr_size;
 
-	bzero((void *) &addr, sizeof(addr));
+	memset((void *) &addr, 0, sizeof(addr));
 	addr.sin_family = AF_INET;
 	addr.sin_addr.s_addr = htonl(INADDR_ANY);
-	addr.sin_port = htons(SERVER_PORT);//comunicacoes de rede utilizam big endian - conversão de inteiro short no host para tipo de inteiro a guardar com formato rede
+	addr.sin_port = htons(server_port);//comunicacoes de rede utilizam big endian - conversão de inteiro short no host para tipo de inteiro a guardar com formato rede
 
 	if ( (fd = socket(AF_INET, SOCK_STREAM, 0)) < 0)//cria um socket - devolve -1 se falhar. SOCK_STREAM para TCP
 		erro("na funcao socket");
@@ -54,19 +57,22 @@ int main(int argc, char **argv) {
 	client_addr_size = sizeof(client_addr);
 	while (1) {
 
-		while(CURR_CLIENTS<MAX_CLIENTS){
+		while(curr_clients<max_clients){
 			//quando finalmente chega um cliente temos de guardar os seus dados numa estrutura(ip, ...). A funcao accept escreve nos seus parametros os dados dos clientes. Devolve um descritor de socket(mesmo tipo de fd) ou -1 se falhar
 			if ((client = accept(fd,(struct sockaddr *)&client_addr,(socklen_t *)&client_addr_size))>0) {
-				CURR_CLIENTS++;
+				curr_clients++;
 				if (fork() == 0) {//depois do accept faço um fork para continuar à escuta no socket principal
 					close(fd);//processo filho fecha o socket fd
-					process_client(client, CURR_CLIENTS, (struct sockaddr_in) client_addr);//processa os dados do cliente
-					CURR_CLIENTS--;
+					process_client(client, curr_clients, (struct sockaddr_in) client_addr);//processa os dados do cliente
+					curr_clients--;
 					exit(0);
 				}
-				//??? close(client);//fecha a ligação com o cliente se falhar
+				//add client to lista ligada
+				close(client); //fecha a ligação com o cliente na parent
 			}
 		}
+		//foi atingido o numero maximo de client_addr_size
+		wait(NULL);				//espera pela saída de 1 cliente
 	}
 	return 0;
 }
@@ -82,9 +88,9 @@ void process_client(int client_fd, int client, struct sockaddr_in client_info){
 	int nread = 0;
 	char buffer[BUF_SIZE];
 	while(1){
-		bzero(buffer, BUF_SIZE);
-		nread=0;
+		memset(buffer, 0, BUF_SIZE);
 		nread = read(client_fd, buffer, BUF_SIZE);
+		//buffer[nread] = '\0';				last line: BUF_SIZE-1
 		#ifdef DEBUG
 			printf("RECEBI %s\n", buffer);//DEBUG
 		#endif
@@ -104,28 +110,25 @@ void process_client(int client_fd, int client, struct sockaddr_in client_info){
 
 			int n_files=0;
 			while((dptr = readdir(dp))!=NULL){
-				if(dptr->d_name[0]=='.')  //Files never begin with '.'
-					continue;
-				//??????
-				if(dptr->d_name[0]=='.' && dptr->d_name[1]=='.')  //Files never begin with '..'
-					continue;
+				if(dptr->d_name[0]!='.')  //Files never begin with '.'
+					n_files++;;
 				//Ver como e que vamos ver os tamanhos a enviar
 				//Se os dados a enviar excederem o tamanho do pacote vamos ter problemas
 				//Os dados podem não chegar por ordem
-				n_files++;
 			}
 			send_int(n_files, client_fd);
 			if ((dp = opendir(dir))==NULL){
 				perror("Cannot open the given directory");
 			}
 			while((dptr = readdir(dp))!=NULL){
-				if(dptr->d_name[0]=='.')  //Files never begin with '.'
-					continue;
-				if(dptr->d_name[0]=='.' && dptr->d_name[1]=='.')  //Files never begin with '..'
-					continue;
-				bzero(buffer, sizeof(buffer));
-				strcat(buffer,dptr->d_name);
-				write(client_fd, buffer, strlen(buffer));
+				if(dptr->d_name[0]!='.')  //Files never begin with '.'
+					memset(buffer, 0, sizeof(buffer));
+					strcat(buffer,dptr->d_name);
+					#ifdef DEBUG
+					printf("%s\n", dptr->d_name);
+					#endif
+					write(client_fd, buffer, strlen(buffer));
+					usleep(100);
 			}
 		}
 		else if(strcmp(buffer,"QUIT")==0){
@@ -158,25 +161,56 @@ void process_client(int client_fd, int client, struct sockaddr_in client_info){
 					}
 
 					while((dptr = readdir(dp))!=NULL){
-						if(dptr->d_name[0]=='.')  //Files never begin with '.'
-							continue;
-						//??????
-						if(dptr->d_name[0]=='.' && dptr->d_name[1]=='.')  //Files never begin with '..'
-							continue;
-
-						//tcp
-						else if(strcmp(dptr->d_name, down_comm[2])==0){//Se encontrar o ficheiro
-							send_int(1,client_fd);				//???
-							strcat(cwd,dptr->d_name);
-							enviaStringBytes(dir, client_fd);
-							break;
+						//if it finds the file with same name
+						if(strcmp(dptr->d_name, down_comm[2])==0){
+							//tcp
+							if (strcmp("TCP", down_comm[0]){
+								#ifdef DEBUG
+									printf("TCP\n");
+								#endif
+								//not encripted
+								if (strcmp("NOR", down_comm[1]){
+									#ifdef DEBUG
+										printf("Not encripted\n");
+									#endif
+									send_int(1,client_fd);
+									strcat(dir,dptr->d_name);
+									enviaStringBytes(dir, client_fd);
+									break;
+								}
+									//encripted
+								else if (strcmp("ENC", down_comm[1]){
+									#ifdef DEBUG
+										printf("Encripted\n");
+									#endif
+								}
+							}
+							//udp
+							else if (strcmp("UDP", down_comm[0]){
+								//not encripted
+								#ifdef DEBUG
+									printf("UDP\n");
+								#endif
+								if (strcmp("NOR", down_comm[1]){
+									#ifdef DEBUG
+										printf("Not encripted\n");
+									#endif
+								}
+								//encripted
+								else if (strcmp("ENC", down_comm[1]){
+									#ifdef DEBUG
+										printf("Encripted\n");
+									#endif
+								}
+							}
 						}
 					}
-					if(dptr==NULL){//Não encontrou o ficheiro
+					//if it doesn't find the file
+					if(dptr==NULL){
 						send_int(0,client_fd);
 					}
 				}
-				//else //wrong download command
+				//else //wrong download command /number of argumetns
 			}
 			//else //wrong command
 		}
@@ -189,64 +223,52 @@ void erro(char *msg){
 }
 
 void send_int(int num, int fd){
-  int32_t conv = htonl(num);
-  char *data = (char*)&conv;
-  int left = sizeof(conv);
-  int rc;
-  do {
-    rc = write(fd, data, left);
-		data += rc;
-		left -= rc;
-  }while (left > 0);
+	num = htonl(num);
+	write(client_fd, &num, sizeof(num));
 }
 
-int receive_int (int fd){
-  int32_t ret;
-  char *data = (char*)&ret;
-  int left = sizeof(ret);
-  int rc;
-  do {
-    rc = read(fd, data, left);
-		data += rc;
-		left -= rc;
-  }while (left > 0);
-  return ntohl(ret);
+int receive_int(int fd){
+	int aux=0;
+  read(fd, &aux, sizeof(aux));
+  return ntohl(aux);
 }
+
 void enviaStringBytes(char *file, int client_fd){
 	FILE *read_ptr;
 	read_ptr = fopen(file,"rb");
 
-	fseek(read_ptr, 0, SEEK_END);							//que faz isto??
-	unsigned int filesize = ftell(read_ptr);	//e isto
-	fseek(read_ptr, 0, SEEK_SET);							//mais isto de novo
-	unsigned char stream[BUF_SIZE];						//ok... talvez tenha pecebido +/- a ideia... mas resulta??
-	bzero(stream, sizeof(stream));
+	fseek(read_ptr, 0, SEEK_END);
+	unsigned int filesize = ftell(read_ptr);
+	#ifdef DEBUG
+		printf("Tamanho do ficheiro %d\n", filesize);
+	#endif
+	fseek(read_ptr, 0, SEEK_SET);
+	unsigned char stream[BUF_SIZE];
+	memset(stream, 0, sizeof(stream));
 	//Send filesize
 	send_int(filesize, client_fd);
-	int n_sent;
-	int n_received;
-	while((n_sent=fread(stream,BUF_SIZE,1,read_ptr)!=0){
-		n_received=0;
-		write(client_fd,stream,BUF_SIZE);
-		bzero(stream, sizeof(stream));
-
-		if(n_sent!=n_received){
-			do{
-				//problemas;
-				//enviar parte que falta
-				//fatiar stream??
-
-				// for ( size_t i = start; i <= end; ++i ) {
-        // 	buffer[j++] = str[i];
-    		// }
-    		// buffer[j] = 0;
-
-				//não podes enviar de novo pois vais reescrever no client
-				fseek(read_ptr, -(n_sent-n_received), SEEK_CUR);//Anda para tras e reenvia o pacote
-			}while (n_sent!=n_received);
+	int n_sent,  n_received, left_size=filesize;
+	while(left_size>0){
+		if(left_size-total_read>BUF_SIZE){
+			n_received=BUF_SIZE;
 		}
-		
-		filesize=filesize-n_sent;//Continua
+		else{
+			n_received=left_size%BUF_SIZE;
+		}
+		#ifdef DEBUG
+			printf("File SIZE ATUAL: %d\t", left_size);
+		#endif
+		n_sent=fread(stream,BUF_SIZE,1,read_ptr);
+
+		#ifdef DEBUG
+			printf("N_SENT: %d\n", n_sent);
+		#endif
+
+		write(client_fd,stream,BUF_SIZE);
+		memset(stream, 0, sizeof(stream));
+
+		left_size-=n_sent;
+		usleep(100);
 	}
 	fclose(read_ptr);
 }
