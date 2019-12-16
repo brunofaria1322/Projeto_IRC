@@ -307,7 +307,7 @@ void handleUDP(char *file, char*type, int port) {
   struct sockaddr_in serv_addr, prox_addr;
 	//creates udp socket
 	int sockfd;
-	if ( (sockfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0 ) {
+	if ( (sockfd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0 ) {
 		perror("udp socket creation has failed");
 	}
 
@@ -320,7 +320,7 @@ void handleUDP(char *file, char*type, int port) {
   serv_addr.sin_port = htons(port);
 
   // Bind the socket with the server address
-  if ( bind(sockfd, (const struct sockaddr *)&serv_addr,  sizeof(serv_addr)) < 0 ) {
+  if ( bind(sockfd, (struct sockaddr *)&serv_addr,  sizeof(serv_addr)) < 0 ) {
       perror("bind on udp socket has failed");
   }
 
@@ -336,9 +336,9 @@ void handleUDP(char *file, char*type, int port) {
 	char stream[BUF_SIZE];
 	memset(stream, 0, sizeof(stream));
 	//send filesize
+	sleep(1);
 	send_int_UDP(filesize, sockfd, prox_addr);
-	usleep(1000);
-	printf ("sent");
+	printf ("sent\n");
 	sleep(3);
 	int n_sent,  n_received, left_size=filesize;
 	//Encripted
@@ -374,13 +374,19 @@ void handleUDP(char *file, char*type, int port) {
 }
 
 void send_int_UDP(int num, int fd, struct sockaddr_in addr){
-	sendto(fd, &num, sizeof(num),0, (const struct sockaddr *) &addr, sizeof(addr));
+	num = htonl(num);
+	if((sendto(fd, &num, 1+sizeof(num),MSG_CONFIRM , (struct sockaddr *) &addr, sizeof(addr)))==-1){
+		erro("Erro no sendto");
+	}
+	printf("MANDEI\n");
 }
 
 int receive_int_UDP(int fd, struct sockaddr_in addr){
 	int aux;
 	socklen_t len = sizeof(addr);
-	recvfrom(fd, &aux, sizeof(aux),  0, ( struct sockaddr *) &addr, &len);
+	if (recvfrom(fd, &aux, 1+sizeof(aux),MSG_WAITALL , ( struct sockaddr *) &addr, (socklen_t *)&len)==-1){
+		erro("Erro no recvfrom");
+	}
   return ntohl(aux);
 }
 

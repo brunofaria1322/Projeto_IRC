@@ -13,12 +13,12 @@
 #define DEBUG 			//comment this line to remove debug comments
 
 void erro(char *msg);
-void process_client(int client_fd, int port);
+void process_client(int client_fd, int port, struct hostent *proxyHostPtr);
 void recebeStringBytesTCP(char *file, int server_fd);
 int readfile(int sock,char *filename);
 int receive_int_TCP(int fd);
 void send_int_TCP(int num, int fd);
-void handleUDP(char *file, char*type, int port);
+void handleUDP(char *file, char*type, int port, struct hostent *proxyHostPtr);
 void send_int_UDP(int num, int fd, struct sockaddr_in addr);
 int receive_int_UDP(int fd, struct sockaddr_in addr);
 
@@ -48,7 +48,7 @@ int main(int argc, char *argv[]) {
 		erro("socket");
 	if( connect(fd,(struct sockaddr *)&addr,sizeof (addr)) !=0)
 		erro("Connect");
-	process_client(fd, port);
+	process_client(fd, port, proxyHostPtr);
 	close(fd);
 	exit(0);
 }
@@ -57,7 +57,7 @@ void erro(char *msg) {
 	perror(msg);
 	exit(-1);
 }
-void process_client(int client_fd, int port){
+void process_client(int client_fd, int port, struct hostent *proxyHostPtr){
 	char buffer[BUF_SIZE];
 	char command[BUF_SIZE];
 	while(1){
@@ -126,7 +126,7 @@ void process_client(int client_fd, int port){
 					}
 					//UDP
 					else if (strcmp("UDP", down_comm[0])==0){
-						handleUDP(down_comm[2], down_comm[1],port);
+						handleUDP(down_comm[2], down_comm[1],port, proxyHostPtr);
 					}
 				}
 				//else //wrong download command /num of elements
@@ -201,21 +201,22 @@ void send_int_TCP(int num, int fd){
 	write(fd, &num, sizeof(num));
 }
 
-void handleUDP(char *file, char*type, int port) {
+void handleUDP(char *file, char*type, int port, struct hostent *proxyHostPtr) {
 
   struct sockaddr_in serv_addr;
-	//creates udp socket
-	int sockfd;
-	if ( (sockfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0 ) {
-		perror("udp socket creation has failed");
-	}
 
 	memset(&serv_addr, 0, sizeof(serv_addr));
 
   // Filling server information
   serv_addr.sin_family = AF_INET; // IPv4
-  serv_addr.sin_addr.s_addr = INADDR_ANY;
-  serv_addr.sin_port = htons(port);
+  serv_addr.sin_addr.s_addr = ((struct in_addr *)(proxyHostPtr->h_addr))->s_addr;
+  serv_addr.sin_port = htons((short) port);
+
+	//creates udp socket
+	int sockfd;
+	if ( (sockfd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0 ) {
+		perror("udp socket creation has failed");
+	}
 
 	int filesize =receive_int_UDP(sockfd,serv_addr);
 	#ifdef DEBUG
@@ -245,7 +246,7 @@ void handleUDP(char *file, char*type, int port) {
 			n_received=left_size%BUF_SIZE;
 		}
 		len = sizeof(serv_addr);
-		nread = recvfrom(sockfd, (char *)buffer, BUF_SIZE,  0, ( struct sockaddr *) &serv_addr, &len);
+		nread = recvfrom(sockfd, (char *)buffer, BUF_SIZE,  0, ( struct sockaddr *) &serv_addr, (socklen_t *)&len);
 
 		//Enviar confirmacao
 		#ifdef DEBUG
@@ -260,7 +261,7 @@ void handleUDP(char *file, char*type, int port) {
 			n=start;
 			while(n-start<timeout){
 				len = sizeof(serv_addr);
-				nread = recvfrom(sockfd, (char *)buffer, BUF_SIZE,  0, ( struct sockaddr *) &serv_addr, &len);
+				nread = recvfrom(sockfd, (char *)buffer, BUF_SIZE,  0, ( struct sockaddr *) &serv_addr, (socklen_t *)&len);
 
 				if(nread!=0){
 					fwrite(buffer, sizeof(unsigned char), nread, write_ptr);
@@ -276,12 +277,18 @@ void handleUDP(char *file, char*type, int port) {
 }
 
 void send_int_UDP(int num, int fd, struct sockaddr_in addr){
-	sendto(fd, &num, sizeof(num),0, (const struct sockaddr *) &addr, sizeof(addr));
+	num = htonl(num);
+	if((sendto(fd, &num, 1+sizeof(num),MSG_CONFIRM , (struct sockaddr *) &addr, sizeof(addr)))==-1){
+		erro("Erro no sendto");
+	}
 }
 
 int receive_int_UDP(int fd, struct sockaddr_in addr){
 	int aux;
 	socklen_t len = sizeof(addr);
-	recvfrom(fd, &aux, sizeof(aux),  0, ( struct sockaddr *) &addr, &len);
+	printf("Tou à espera\n");
+	if (recvfrom(fd, &aux, 1+sizeof(aux),MSG_WAITALL , ( struct sockaddr *) &addr, (socklen_t *)&len)==-1){
+		erro("Erro no recvfrom");
+	}
   return ntohl(aux);
 }
