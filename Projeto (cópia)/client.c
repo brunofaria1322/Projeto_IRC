@@ -10,254 +10,202 @@
 #include <time.h>
 
 #define BUF_SIZE	1024
-#define DEBUG
+#define DEBUG 			//comment this line to remove debug comments
 
 void erro(char *msg);
 void process_client(int client_fd);
-int receive_int(int *num, int fd);
-int send_int(int num, int fd);
-int recebeStringBytes(char *file, int server_fd);
+void recebeStringBytesTCP(char *file, int server_fd);
 int readfile(int sock,char *filename);
+int receive_int(int fd);
+void send_int(int num, int fd);
 
 int main(int argc, char *argv[]) {
-	char endServer[100];
+	char proxyAddress[128];
 	int fd;
 	struct sockaddr_in addr;
-	struct hostent *hostPtr;
+	struct hostent *proxyHostPtr;
 
-	if (argc != 3) {
-		printf("cliente <host> <port> \n");
+	if (argc != 5) {
+		printf("client {proxy address} {server address} {port} {protocol}\n");
 		exit(-1);
 	}
 
-	strcpy(endServer, argv[1]);
-	if ((hostPtr = gethostbyname(endServer)) == 0)
-		erro("Nao consegui obter endereço");
-	
-	bzero((void *) &addr, sizeof(addr));
+	//get proxy
+	strcpy(proxyAddress, argv[1]);
+	if ((proxyHostPtr = gethostbyname(proxyAddress)) == 0)
+		erro("Couldnt get Proxy address");
+
+	memset((void *) &addr, 0, sizeof(addr));
 	addr.sin_family = AF_INET;
-	addr.sin_addr.s_addr = ((struct in_addr *)(hostPtr->h_addr))->s_addr;
-	addr.sin_port = htons((short) atoi(argv[2]));
+	addr.sin_addr.s_addr = ((struct in_addr *)(proxyHostPtr->h_addr))->s_addr;
+	addr.sin_port = htons((short) atoi(argv[3]));			//host to network
 
 	if((fd = socket(AF_INET,SOCK_STREAM,0)) == -1)
 		erro("socket");
-	if( connect(fd,(struct sockaddr *)&addr,sizeof (addr)) < 0)
+	if( connect(fd,(struct sockaddr *)&addr,sizeof (addr)) !=0)
 		erro("Connect");
+	char buffer[BUF_SIZE];
+	strcpy(buffer, argv[4]);
+	strcpy(buffer, " ");
+	strcpy(buffer, argv[2]);
+	printf("Enviei %s\n", buffer);
+	write(fd, buffer, strlen(buffer)+1);
 	process_client(fd);
 	close(fd);
 	exit(0);
 }
 
 void erro(char *msg) {
-	printf("Erro: %s\n", msg);
+	perror(msg);
 	exit(-1);
 }
 void process_client(int client_fd){
-	int nread;
 	char buffer[BUF_SIZE];
-	char comando[BUF_SIZE];
+	char command[BUF_SIZE];
 	while(1){
-		printf("Qual o comado?");
-		scanf("%[^\n]%*c",comando);
+		printf("Enter command!\n");
+		fgets(command,BUF_SIZE,stdin);
 		fflush(stdin);
-		if (strcmp(comando,"LIST")==0){
-			write(client_fd,comando,1+strlen(comando));
-			int n_files=0;
-			receive_int(&n_files,client_fd);
+		command[strlen(command)-1]='\0';			//removes \n from input
+
+		if (strcmp(command,"LIST")==0){
+			write(client_fd,command,1+strlen(command));
+			int n_files=receive_int(client_fd);
 			#ifdef DEBUG
-			printf("N de ficheiros: %d\n",n_files);
+			printf("Num de ficheiros: %d\n",n_files);
 			#endif
+
 			printf("Os ficheiros existentes para download são:\n");
 			for(int i=0; i<n_files; i++){
-				bzero(buffer, BUF_SIZE);
-				nread = read(client_fd, buffer, BUF_SIZE-1);
-				buffer[nread] = '\0';
+				memset(buffer, 0, BUF_SIZE);
+				read(client_fd, buffer, BUF_SIZE);
+				//buffer[nread] = '\0';				last line: nread=read(..., BUF_SIZE-1);
 				printf("%s\n",buffer);
 				}
-		}else if(strcmp(comando,"QUIT")==0){//fecha a ligaçao com o server
-			write(client_fd,comando,1+strlen(comando));
+		}
+		else if(strcmp(command,"QUIT")==0){//fecha a ligaçao com o server
+			write(client_fd,command,1+strlen(command));
 			break;
-		}else{
-		char *token;
-		char dup[BUF_SIZE];
-		strcpy(dup, comando);
-		token = strtok(comando," ");
-		if(strcmp(token,"DOWNLOAD")==0){
-			char file[256], tipo[4], enc[4];
-			token = strtok(NULL, " ");
-			if(token!=NULL){
-				strcpy(tipo, token);
+		}
+		else{
+			char aux_com[BUF_SIZE];
+			strcpy(aux_com,command);
+
+			if(strcmp(strtok(aux_com, " "),"DOWNLOAD")==0){
+				//deviamos estar a verificar isto no servidor e não no cliente certo?
+				char down_comm [3][BUF_SIZE/4];		//[protocol, encripted, name]
+				char* token;
+				int count =-1;
+				while( (token = strtok(NULL, " ")) ) {
+					count++;
+					printf("%d\t", count);
+					printf("%s\n", token);
+					if (count>2) {
+						count++;
+						break;}
+					strcpy (down_comm [count],token);
 				}
-			token = strtok(NULL, " ");
-			if(token!=NULL){
-			strcpy(enc, token);
+
+				write(client_fd,command,sizeof(command));
+
+				//receber o download
+				if(receive_int(client_fd)==0){
+					//wrong download command
+					printf("Command not accepted\n");
+				}
+				else{
+					printf("accepted\n");
+					//TCP
+					if ((strcmp("TCP", down_comm[0]))==0){
+						//not encripted
+						if (strcmp("NOR", down_comm[1])==0){
+							recebeStringBytesTCP(down_comm[2], client_fd);
+						}
+						//encripted
+						else if (strcmp("ENC", down_comm[1])==0){
+
+						}
+					}
+					//UDP
+					else if (strcmp("UDP", down_comm[0])==0){
+						//not encripted
+						if (strcmp("NOR", down_comm[1])==0){
+
+						}
+						//encripted
+						else if (strcmp("ENC", down_comm[1])==0){
+
+						}
+					}
+				}
+				//else //wrong download command /num of elements
 			}
-			token = strtok(NULL, " ");
-			if(token!=NULL){
-			strcpy(file, token);
-			#ifdef DEBUG
-			printf("TIPO: %s ENC: %s FILE: %s\n", tipo, enc, file);
-			#endif
-			int aux=0;
-			write(client_fd,dup,1+strlen(dup));
-			read(client_fd, &aux, sizeof(aux));
-			aux = ntohl(aux);
-			if(aux==0){
-				printf("Ocorreu um erro a transferir o ficheiro\n");
-			}else{
-				recebeStringBytes(file, client_fd);
-				}
-			}else{
-				printf("DOWNLOAD <TCP/UDP> <ENC/NOR> FILE\n");
-				}
-		}else{
-			//COMANDO DESCONHECIDO
-			printf("Comando desconhecido");
-			}
+			//else //wrong command
 		}
 	}
 }
 
-int recebeStringBytes(char *file, int server_fd){
+void recebeStringBytesTCP(char *file, int server_fd){
 	FILE *write_ptr;
-	int nread;
+	int nread, n_received, timeout=3;
 	unsigned char buffer[BUF_SIZE];
-	int filesize=0;
-	
-	int timeout=3;
-	
-	read(server_fd, &filesize, sizeof(filesize));
-	filesize = ntohl(filesize);
-	printf("Filesize %d\n", filesize);//DEBUG
-	char cwd[256];
-	if(getcwd(cwd, sizeof(cwd)) == NULL){
-		printf("No such file or directory");
-		return 1;
+	memset(buffer, 0, BUF_SIZE);
+
+	int filesize =receive_int(server_fd);
+	#ifdef DEBUG
+		printf("Filesize %d\n", filesize);
+	#endif
+
+	char dir[256];
+	if(getcwd(dir, sizeof(dir)) == NULL){					//get current path
+		erro("Couldn't get current directory");
 	}
-	strcat(cwd,"/Downloads/");
-	strcat(cwd,file);
-	write_ptr = fopen(cwd, "wb");
-	int n_received;
-	for(int i=filesize; i>=0; i=i-BUF_SIZE){
-		nread=0;
-		n_received=0;
-		if(filesize/BUF_SIZE>0){
-				n_received=BUF_SIZE;
-				}else{
-					n_received=i%BUF_SIZE;
-					}
+	strcat(dir,"/Downloads/");
+	strcat(dir,file);
+	write_ptr = fopen(dir, "wb+");
+
+	int total_read=0, left_size=filesize;
+	while(left_size>0){
+		if(left_size-total_read>BUF_SIZE){
+			n_received=BUF_SIZE;
+		}
+		else{
+			n_received=left_size%BUF_SIZE;
+		}
 		nread = read(server_fd, buffer, n_received);
 		//Enviar confirmacao
 		#ifdef DEBUG
-		printf("PACOTE DE: %d\t", n_received);
-		printf("N_READ: %d\n", nread);
+			printf("PACOTE DE: %d\t", n_received);
+			printf("N_READ: %d\n", nread);
 		#endif
 		if(nread!=0){
 			fwrite(buffer, sizeof(unsigned char), nread, write_ptr);
-		}else{
-			int n=0;
-			int start= time(NULL);
+		}
+		else{
+			int n, start= time(NULL);
+			n=start;
 			while(n-start<timeout){
-			nread = read(server_fd, buffer, n_received);
-			if(nread!=0){
-				fwrite(buffer, sizeof(unsigned char), nread, write_ptr);
-				break;
+				nread = read(server_fd, buffer, n_received);
+				if(nread!=0){
+					fwrite(buffer, sizeof(unsigned char), nread, write_ptr);
+					break;
 				}
-			n=time(NULL);
+				n=time(NULL);
 			}
 			break;
-			}
+		}
+		left_size-=nread;
 	}
 	fclose(write_ptr);
-	return 0;
-}
-int readdata(int sock, void *buf, int buflen)
-{
-    unsigned char *pbuf = (unsigned char *) buf;
-
-    while (buflen > 0)
-    {
-        int num = read(sock, pbuf, buflen);
-
-        pbuf += num;
-        buflen -= num;
-    }
-
-    return 0;
 }
 
-int readlong(int sock, long *value)
-{
-    if (!readdata(sock, value, sizeof(value)))
-        return 1;
-    *value = ntohl(*value);
-    return 0;
+int receive_int(int fd){
+	int aux=0;
+  read(fd, &aux, sizeof(aux));
+  return ntohl(aux);
 }
 
-int readfile(int sock,char *filename)
-{
-	char cwd[256];
-	if(getcwd(cwd, sizeof(cwd)) == NULL){
-		printf("No such file or directory");
-		return 1;
-	}
-	strcat(cwd,"/Downloads/");
-	strcat(cwd,filename);
-	FILE *f = fopen(cwd, "wb");
-    long filesize;
-    if (!readlong(sock, &filesize))
-        return 1;
-    printf("Filesize: %li\n", filesize);
-    if (filesize > 0)
-    {
-        char buffer[BUF_SIZE];
-        do
-        {
-            int num = BUF_SIZE%filesize;
-            if (!readdata(sock, buffer, num))
-                return 1;
-            int offset = 0;
-            do
-            {
-                size_t written = fwrite(&buffer[offset], 1, num-offset, f);
-                if (written < 1)
-                    return 1;
-                offset += written;
-            }
-            while (offset < num);
-            filesize -= num;
-        }
-        while (filesize > 0);
-    }
-    return 0;
-}
-
-int receive_int(int *num, int fd){
-    int32_t ret;
-    char *data = (char*)&ret;
-    int left = sizeof(ret);
-    int rc;
-    do {
-        rc = read(fd, data, left);
-            
-		data += rc;
-		left -= rc;
-    }while (left > 0);
-    *num = ntohl(ret);
-    return 0;
-}
-
-	int send_int(int num, int fd){
-    int32_t conv = htonl(num);
-    char *data = (char*)&conv;
-    int left = sizeof(conv);
-    int rc;
-    do {
-        rc = write(fd, data, left);
-        
-		data += rc;
-		left -= rc;
-    }
-    while (left > 0);
-    return 0;
+void send_int(int num, int fd){
+	num = htonl(num);
+	write(fd, &num, sizeof(num));
 }
