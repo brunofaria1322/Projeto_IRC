@@ -19,6 +19,7 @@
 int SERVER_PORT;
 int MAX_CLIENTS;
 int CURR_CLIENTS=0;
+int sendfile(int sock, char *filename);
 
 void process_client(int fd, int CLIENT, struct sockaddr_in client_info);
 void erro(char *msg);
@@ -193,6 +194,63 @@ int main(int argc, char **argv) {
 	exit(-1);
 	}
 	
+	void enviaStringBytes(char *file, int client_fd){
+		FILE *read_ptr;
+		read_ptr = fopen(file,"rb");
+		if(read_ptr == NULL)
+	   {
+		  printf("Error!");   
+		  exit(1);             
+		}
+		
+		fseek(read_ptr, 0, SEEK_END);
+		int filesize = ftell(read_ptr);
+		#ifdef DEBUG
+		printf("Tamanho do ficheiro %d\n", filesize);
+		#endif
+		int fsize=filesize;
+		fseek(read_ptr, 0, SEEK_SET);
+		unsigned char *stream;
+		stream=(unsigned char*)malloc(BUF_SIZE*sizeof(unsigned char));
+		//Send filesize
+		filesize = htonl(filesize);
+		// Write the number to the opened socket
+		write(client_fd, &filesize, sizeof(filesize));
+		int n_sent;
+		int n_received;
+		do{
+			n_sent=0;
+			n_received=0;
+			if(fsize/BUF_SIZE>0){
+				n_received=BUF_SIZE;
+				}else{
+					n_received=fsize%BUF_SIZE;
+					}
+			#ifdef DEBUG
+			printf("N_SIZE: %d\n", n_received);
+			#endif
+			n_sent=fread(stream,sizeof(unsigned char),n_received,read_ptr);
+			#ifdef DEBUG
+			printf("N_SENT: %d\n", n_sent);
+			#endif
+			write(client_fd,stream,BUF_SIZE);
+			sleep(1);
+			
+			read(client_fd, &n_received, sizeof(n_received));
+			n_received = ntohl(n_received);
+			#ifdef DEBUG
+			printf("N RECEBIDO: %d\n", n_received);
+			#endif
+			if(n_sent!=n_received){
+				fseek(read_ptr, -BUF_SIZE, SEEK_CUR);//Anda para tras e reenvia o pacote
+			}else{
+				filesize=filesize-BUF_SIZE;//Continua
+				}
+		}while(filesize-BUF_SIZE>0);
+		fclose(read_ptr);
+		free(stream);
+		}
+
 	int send_int(int num, int fd){
     int32_t conv = htonl(num);
     char *data = (char*)&conv;
@@ -223,38 +281,50 @@ int receive_int(int *num, int fd){
     return 0;
 }
 
-	void enviaStringBytes(char *file, int client_fd){
-		FILE *read_ptr;
-		read_ptr = fopen(file,"rb");
-		
-		fseek(read_ptr, 0, SEEK_END);
-		int filesize = ftell(read_ptr);
-		#ifdef DEBUG
-		printf("Tamanho do ficheiro %d\n", filesize);
-		#endif
-		fseek(read_ptr, 0, SEEK_SET);
-		unsigned char stream[BUF_SIZE];
-		bzero(stream, sizeof(stream));
-		//Send filesize
-		filesize = htonl(filesize);
-		// Write the number to the opened socket
-		write(client_fd, &filesize, sizeof(filesize));
-		int n_sent;
-		int n_received;
-		do{
-			n_sent=0;
-			n_received=0;
-			n_sent=fread(stream,BUF_SIZE,1,read_ptr);
-			write(client_fd,stream,BUF_SIZE);
-			sleep(1);
-			bzero(stream, sizeof(stream));
-			
-			receive_int(&n_received, client_fd);
-			if(n_sent!=n_received){
-				fseek(read_ptr, -BUF_SIZE, SEEK_CUR);//Anda para tras e reenvia o pacote
-			}else{
-				filesize=filesize-BUF_SIZE;//Continua
-				}
-		}while(filesize-BUF_SIZE>0);
-		fclose(read_ptr);
-		}
+int senddata(int sock, void *buf, int buflen){
+    unsigned char *pbuf = (unsigned char *) buf;
+    while (buflen > 0)
+    {
+        int num = write(sock, pbuf, buflen);
+        sleep(1);
+
+        pbuf += num;
+        buflen -= num;
+    }
+
+    return 1;
+}
+
+int sendlong(int sock, long value)
+{
+    value = htonl(value);
+    return senddata(sock, &value, sizeof(value));
+}
+
+int sendfile(int sock, char *filename)
+{
+	FILE *f = fopen(filename,"rb");
+    fseek(f, 0, SEEK_END);
+    long filesize = ftell(f);
+    rewind(f);
+    if (filesize == EOF)
+        return 0;
+    if (!sendlong(sock, filesize))
+        return 0;
+    if (filesize > 0)
+    {
+        char buffer[BUF_SIZE];
+        do
+        {
+            int num = BUF_SIZE%filesize;
+            num = fread(buffer, 1, num, f);
+            if (num < 1)
+                return 0;
+            if (!senddata(sock, buffer, num))
+                return 0;
+            filesize -= num;
+        }
+        while (filesize > 0);
+    }
+    return 1;
+}

@@ -16,6 +16,7 @@ void process_client(int client_fd);
 int receive_int(int *num, int fd);
 int send_int(int num, int fd);
 int recebeStringBytes(char *file, int server_fd);
+int readfile(int sock,char *filename);
 
 int main(int argc, char *argv[]) {
 	char endServer[100];
@@ -98,7 +99,8 @@ void process_client(int client_fd){
 			#endif
 			int aux=0;
 			write(client_fd,dup,1+strlen(dup));
-			receive_int(&aux, client_fd);
+			read(client_fd, &aux, sizeof(aux));
+			aux = ntohl(aux);
 			if(aux==0){
 				printf("Ocorreu um erro a transferir o ficheiro\n");
 			}else{
@@ -114,12 +116,11 @@ void process_client(int client_fd){
 		}
 	}
 }
+
 int recebeStringBytes(char *file, int server_fd){
 	FILE *write_ptr;
 	int nread;
-	char buffer[BUF_SIZE];
-	bzero(buffer, BUF_SIZE);
-	nread=0;
+	unsigned char buffer[BUF_SIZE];
 	int filesize=0;
 	read(server_fd, &filesize, sizeof(filesize));
 	filesize = ntohl(filesize);
@@ -132,19 +133,93 @@ int recebeStringBytes(char *file, int server_fd){
 	strcat(cwd,"/Downloads/");
 	strcat(cwd,file);
 	write_ptr = fopen(cwd, "wb");
-	for(int i=filesize; i>0; i=i-BUF_SIZE){
+	int n_received;
+	for(int i=filesize; i>=0; i=i-BUF_SIZE){
 		nread=0;
-		nread = read(server_fd, buffer, BUF_SIZE);
+		n_received=0;
+		if(filesize/BUF_SIZE>0){
+				n_received=BUF_SIZE;
+				}else{
+					n_received=filesize%BUF_SIZE;
+					}
+		nread = read(server_fd, buffer, n_received);
 		//Enviar confirmacao
-		send_int(nread, server_fd);
-		if(nread!=(BUF_SIZE%i)){
+		#ifdef DEBUG
+		printf("N_READ: %d", nread);
+		#endif
+		int converted_number = htonl(nread);
+		write(server_fd, &converted_number, sizeof(converted_number));
+		if(nread!=n_received){
 			i=i+BUF_SIZE;
 			}else{
-				fwrite(buffer, BUF_SIZE%i, 1, write_ptr);
+				#ifdef DEBUG
+				printf("Escrevi\n");
+				#endif
+				fwrite(buffer, sizeof(unsigned char), nread, write_ptr);
 				}
 	}
 	fclose(write_ptr);
 	return 0;
+}
+int readdata(int sock, void *buf, int buflen)
+{
+    unsigned char *pbuf = (unsigned char *) buf;
+
+    while (buflen > 0)
+    {
+        int num = read(sock, pbuf, buflen);
+
+        pbuf += num;
+        buflen -= num;
+    }
+
+    return 0;
+}
+
+int readlong(int sock, long *value)
+{
+    if (!readdata(sock, value, sizeof(value)))
+        return 1;
+    *value = ntohl(*value);
+    return 0;
+}
+
+int readfile(int sock,char *filename)
+{
+	char cwd[256];
+	if(getcwd(cwd, sizeof(cwd)) == NULL){
+		printf("No such file or directory");
+		return 1;
+	}
+	strcat(cwd,"/Downloads/");
+	strcat(cwd,filename);
+	FILE *f = fopen(cwd, "wb");
+    long filesize;
+    if (!readlong(sock, &filesize))
+        return 1;
+    printf("Filesize: %li\n", filesize);
+    if (filesize > 0)
+    {
+        char buffer[BUF_SIZE];
+        do
+        {
+            int num = BUF_SIZE%filesize;
+            if (!readdata(sock, buffer, num))
+                return 1;
+            int offset = 0;
+            do
+            {
+                size_t written = fwrite(&buffer[offset], 1, num-offset, f);
+                if (written < 1)
+                    return 1;
+                offset += written;
+            }
+            while (offset < num);
+            filesize -= num;
+        }
+        while (filesize > 0);
+    }
+    return 0;
 }
 
 int receive_int(int *num, int fd){
