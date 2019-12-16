@@ -7,6 +7,7 @@
 #include <unistd.h>
 #include <netdb.h>
 #include <dirent.h> //Para ler pastas
+#include <time.h>
 
 #define BUF_SIZE	1024
 #define DEBUG
@@ -122,6 +123,9 @@ int recebeStringBytes(char *file, int server_fd){
 	int nread;
 	unsigned char buffer[BUF_SIZE];
 	int filesize=0;
+	
+	int timeout=3;
+	
 	read(server_fd, &filesize, sizeof(filesize));
 	filesize = ntohl(filesize);
 	printf("Filesize %d\n", filesize);//DEBUG
@@ -140,23 +144,29 @@ int recebeStringBytes(char *file, int server_fd){
 		if(filesize/BUF_SIZE>0){
 				n_received=BUF_SIZE;
 				}else{
-					n_received=filesize%BUF_SIZE;
+					n_received=i%BUF_SIZE;
 					}
 		nread = read(server_fd, buffer, n_received);
 		//Enviar confirmacao
 		#ifdef DEBUG
-		printf("N_READ: %d", nread);
+		printf("PACOTE DE: %d\t", n_received);
+		printf("N_READ: %d\n", nread);
 		#endif
-		int converted_number = htonl(nread);
-		write(server_fd, &converted_number, sizeof(converted_number));
-		if(nread!=n_received){
-			i=i+BUF_SIZE;
-			}else{
-				#ifdef DEBUG
-				printf("Escrevi\n");
-				#endif
+		if(nread!=0){
+			fwrite(buffer, sizeof(unsigned char), nread, write_ptr);
+		}else{
+			int n=0;
+			int start= time(NULL);
+			while(n-start<timeout){
+			nread = read(server_fd, buffer, n_received);
+			if(nread!=0){
 				fwrite(buffer, sizeof(unsigned char), nread, write_ptr);
+				break;
 				}
+			n=time(NULL);
+			}
+			break;
+			}
 	}
 	fclose(write_ptr);
 	return 0;

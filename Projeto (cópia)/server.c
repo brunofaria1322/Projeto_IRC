@@ -89,6 +89,9 @@ int main(int argc, char **argv) {
 	while(1){
 		bzero(buffer, BUF_SIZE);
 		nread=0;
+		#ifdef DEBUG
+		printf("EM ESPERA\n");
+		#endif
 		nread = read(client_fd, buffer, BUF_SIZE-1);
 		buffer[nread] = '\0';
 		printf("RECEBI %s\n", buffer);//DEBUG
@@ -126,8 +129,6 @@ int main(int argc, char **argv) {
 			}
 			while((dptr = readdir(dp))!=NULL){
 				if(dptr->d_name[0]=='.')  //Files never begin with '.'
-					continue;
-				if(dptr->d_name[0]=='.' && dptr->d_name[1]=='.')  //Files never begin with '..'
 					continue;
 				bzero(buffer, sizeof(buffer));
 				strcat(buffer,dptr->d_name);
@@ -167,8 +168,6 @@ int main(int argc, char **argv) {
 				}
 				while((dptr = readdir(dp))!=NULL){
 					if(dptr->d_name[0]=='.')  //Files never begin with '.'
-						continue;
-					if(dptr->d_name[0]=='.' && dptr->d_name[1]=='.')  //Files never begin with '..'
 						continue;
 					if(strcmp(dptr->d_name, file)==0){//Se encontrar o ficheiro
 						send_int(1,client_fd);
@@ -218,7 +217,7 @@ int main(int argc, char **argv) {
 		write(client_fd, &filesize, sizeof(filesize));
 		int n_sent;
 		int n_received;
-		do{
+		while(fsize>0){
 			n_sent=0;
 			n_received=0;
 			if(fsize/BUF_SIZE>0){
@@ -227,26 +226,17 @@ int main(int argc, char **argv) {
 					n_received=fsize%BUF_SIZE;
 					}
 			#ifdef DEBUG
-			printf("N_SIZE: %d\n", n_received);
+			printf("FSIZE ATUAL: %d\t", fsize);
 			#endif
 			n_sent=fread(stream,sizeof(unsigned char),n_received,read_ptr);
 			#ifdef DEBUG
 			printf("N_SENT: %d\n", n_sent);
 			#endif
 			write(client_fd,stream,BUF_SIZE);
-			sleep(1);
-			
-			read(client_fd, &n_received, sizeof(n_received));
-			n_received = ntohl(n_received);
-			#ifdef DEBUG
-			printf("N RECEBIDO: %d\n", n_received);
-			#endif
-			if(n_sent!=n_received){
-				fseek(read_ptr, -BUF_SIZE, SEEK_CUR);//Anda para tras e reenvia o pacote
-			}else{
-				filesize=filesize-BUF_SIZE;//Continua
-				}
-		}while(filesize-BUF_SIZE>0);
+			usleep(100);
+
+			fsize=fsize-BUF_SIZE;//Continua
+		}
 		fclose(read_ptr);
 		free(stream);
 		}
