@@ -153,6 +153,8 @@ void recebeStringBytesTCP(char *file, int server_fd){
 	unsigned char buffer[BUF_SIZE];
 	memset(buffer, 0, BUF_SIZE);
 
+	clock_t download_time = clock();
+
 	int filesize =receive_int_TCP(server_fd);
 	#ifdef DEBUG
 		printf("Filesize %d\n", filesize);
@@ -168,7 +170,7 @@ void recebeStringBytesTCP(char *file, int server_fd){
 
 	int total_read=0, left_size=filesize;
 	while(left_size>0){
-		if(left_size-total_read>BUF_SIZE){
+		if(left_size>BUF_SIZE){
 			n_received=BUF_SIZE;
 		}
 		else{
@@ -197,8 +199,11 @@ void recebeStringBytesTCP(char *file, int server_fd){
 			break;
 		}
 		left_size-=nread;
+		total_read+=nread;
 	}
 	fclose(write_ptr);
+	download_time =((double)(clock()-download_time))/(CLOCKS_PER_SEC)*1000;
+	printf("--------------------\nNome do ficheiro transferido: %s\nTotal de bytes recebidos: %d\nProtocolo de transporte utilizado na transferência do ficheiro: TCP\nTempo total para download do ficheiro: %ld miliseconds\n--------------------\n",file,total_read,download_time);
 }
 
 int receive_int_TCP(int fd){
