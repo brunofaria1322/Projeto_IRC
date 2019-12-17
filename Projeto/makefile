@@ -7,4 +7,4 @@ client: client.c
 	gcc client.c -D_REENTRANT -Wall -o client
 
 proxy: proxy.c
-	gcc proxy.c -D_REENTRANT -Wall -o proxy
+	gcc proxy.c -D_REENTRANT -Wall -o proxy -pthread

@@ -9,12 +9,35 @@
 #include <arpa/inet.h>
 #include <ctype.h>
 #include <time.h>
+#include <sys/ipc.h>
+#include <sys/shm.h>
+#include <sys/sem.h>
+#include <unistd.h>
+#include <sys/wait.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <semaphore.h>
+#include <fcntl.h>
 
 #define BUF_SIZE	1024
 #define DEBUG
 
+typedef struct{
+	int save;
+	char client_address [32];
+	int client_port;
+	char server_address [32];
+	int server_port;
+	char protocol [32];
+}SharedMemory;
+
+int shmid;            //id of shared memory
+SharedMemory *mem;    //pointer to the shared memory
+sem_t * semSHM;
+
 int server_port;
 
+void commands();
 void process_client(int fd, struct sockaddr_in client_info);
 void erro(char *msg);
 void enviaStringBytes(char *file, int client_fd);
@@ -32,7 +55,29 @@ int main(int argc, char **argv) {
 		printf("proxy <port>\n");
 		exit(-1);
 	}
+
+//*******//
+	if ((shmid = shmget(IPC_PRIVATE, sizeof(SharedMemory), IPC_CREAT|0600))< 0) {
+			perror("Couldn't get/create the shared memory segment!\n");
+			exit(0);
+		}
+
+	mem = (SharedMemory*) shmat(shmid, NULL, 0);
+
+	sem_unlink("SEMSHM");
+
+  semSHM = sem_open("SEMSHM", O_CREAT|O_EXCL, 0600, 1);
+
+//*******//
+
+	if(fork()==0){
+		commands();
+		exit(0);
+	}
+
 	server_port=atoi(argv[1]);
+
+	mem->save=1;
 
 	int fd, client;
 	struct sockaddr_in addr, client_addr;
@@ -70,13 +115,46 @@ int main(int argc, char **argv) {
 	return 0;
 }
 
+void commands(){
+	char command[BUF_SIZE];
+	while(1){
+		printf("Enter command:\n");
+		fgets(command,BUF_SIZE,stdin);
+		fflush(stdin);
+		command[strlen(command)-1]='\0';			//removes \n from input
+
+		if (strcmp(command,"SAVE")==0){
+
+			sem_wait(semSHM);
+			if (mem->save==1)
+				mem->save=0;
+			else mem->save=1;
+			printf("Save setted to %d\n", mem->save);
+			sem_post(semSHM);
+		}
+		else if (strcmp(command,"SHOW")==0){
+
+			sem_wait(semSHM);
+			printf("client- %s:%d\nserver- %s:%d\nprotocol: %s\n", mem->client_address, mem->client_port, mem->server_address, mem->server_port, mem->protocol);
+			sem_post(semSHM);
+		}
+	}
+}
+
 void initialize_connection(int client_fd, struct sockaddr_in client_info){
 
+
+	char client_ip_address[INET_ADDRSTRLEN];
+	inet_ntop(AF_INET, &client_info.sin_addr,client_ip_address, INET_ADDRSTRLEN);
+
 	#ifdef DEBUG
-		char client_ip_address[INET_ADDRSTRLEN];
-		inet_ntop(AF_INET, &client_info.sin_addr,client_ip_address, INET_ADDRSTRLEN);
 		printf("From (IP:port): %s:%d\n", client_ip_address, client_info.sin_port);
 	#endif
+
+	sem_wait(semSHM);
+	strcpy(mem->client_address,client_ip_address);
+	mem->client_port=client_info.sin_port;
+	sem_post(semSHM);
 
 	char buffer[BUF_SIZE];
 	memset(buffer, 0, BUF_SIZE);
@@ -106,6 +184,11 @@ void initialize_connection(int client_fd, struct sockaddr_in client_info){
 	addr.sin_addr.s_addr = ((struct in_addr *)(hostPtr->h_addr))->s_addr;
 	addr.sin_port = htons(9001);
 
+	sem_wait(semSHM);
+	strcpy(mem->server_address,token);
+	mem->server_port=9001;
+	sem_post(semSHM);
+
 	int fd;
 	if((fd = socket(AF_INET,SOCK_STREAM,0)) == -1){
 		erro("socket");
@@ -132,8 +215,7 @@ void erro(char *msg){
 
 void process_clientTCP(int server_fd, int client_fd, struct sockaddr_in client_info){
 	char command[BUF_SIZE];
-	//save
-	int save=0;
+
 	char buffer[BUF_SIZE];
 	while(1){
 		memset(buffer, 0, BUF_SIZE);
@@ -200,6 +282,9 @@ void process_clientTCP(int server_fd, int client_fd, struct sockaddr_in client_i
 					//TCP
 					if ((strcmp("TCP", down_comm[0]))==0){
 						//not encripted
+						sem_wait(semSHM);
+						strcpy(mem->protocol,down_comm[0]);
+						sem_post(semSHM);
 						if (strcmp("NOR", down_comm[1])==0){
 							recebeStringBytesTCP(down_comm[2], server_fd, client_fd);
 						}
@@ -217,8 +302,8 @@ void process_clientTCP(int server_fd, int client_fd, struct sockaddr_in client_i
 void process_clientUDP(int server_fd, int client_fd, struct sockaddr_in client_info){
 
 }
-	save=0;
-	void recebeStringBytesTCP(char *file, int server_fd, int client_fd){
+
+void recebeStringBytesTCP(char *file, int server_fd, int client_fd){
 	int nread, n_received, timeout=3;
 	unsigned char buffer[BUF_SIZE];
 	memset(buffer, 0, BUF_SIZE);
@@ -230,6 +315,9 @@ void process_clientUDP(int server_fd, int client_fd, struct sockaddr_in client_i
 	send_intTCP(filesize, client_fd);
 
 	FILE *write_ptr;
+	sem_wait(semSHM);
+	int save = mem->save;
+	sem_post(semSHM);
 	if (save==1){
 		char dir[256];
 		if(getcwd(dir, sizeof(dir)) == NULL){					//get current path
@@ -255,6 +343,11 @@ void process_clientUDP(int server_fd, int client_fd, struct sockaddr_in client_i
 		#endif
 		if(nread!=0){
 			printf("Vou escrver no file\n" );
+
+			sem_wait(semSHM);
+			save = mem->save;
+			sem_post(semSHM);
+
 			if (save==1){
 				fwrite(buffer, sizeof(unsigned char), nread, write_ptr);
 			}
