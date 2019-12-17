@@ -323,8 +323,7 @@ void recebeStringBytesTCP(char *file, int server_fd, int client_fd){
 		if(getcwd(dir, sizeof(dir)) == NULL){					//get current path
 			erro("Couldn't get current directory");
 		}
-		strcat(dir,"/Sniffed/");
-		strcat(dir,file);
+		strcat(dir,"/Sniffed/temp");
 		write_ptr = fopen(dir, "wb+");
 	}
 	int total_read=0, left_size=filesize;
